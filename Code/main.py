@@ -35,12 +35,11 @@ from pathlib import Path
 # eq = prod_i A_i ^xi_{ij} / A_j,
 # we thus need to take reciprocal.
 
-equil_consts_plummer = 1 / np.exp(np.array([10.339, 1.979, -13.997, -8.406, -4.362])) 
-equil_consts_plummer[3:5] = 1 / equil_consts_plummer[3:5]
+equil_consts = 1 / np.exp(np.array([10.339, 1.979, -13.997, -8.406, -4.362])) 
+equil_consts[3:5] = 1 / equil_consts[3:5]
 
-#equil_consts_plummer = np.array([3e-2, 1e-1, 2e3, 2e-1, 1e-2])
+
 # Stochiometric matrix for the reactions between primary and secondary species.
-
 # Between aqueous species
 S = sps.csr_matrix(
     np.array(
@@ -69,7 +68,6 @@ E = sps.csr_matrix(
 # primary species (the column of S should be all zeros).
 
 # Bookkeeping
-# Index of aquatic and fixed components, referring to the cell-wise T vector
 aq_components = np.array([0, 1, 2, 3])
 fixed_components = 0
 num_aq_components = aq_components.size
@@ -97,7 +95,6 @@ flow_kw = "flow"
 pressure = "pressure"
 tot_var = "T"
 log_var = "log_X"
-temperature = "temperature"
 tracer = "passive_tracer"
 
 minerals = "minerals"
@@ -106,30 +103,19 @@ min_2 = "CaSO4"
 
 mortar_pressure = "mortar_pressure"
 mortar_transport = "mortar_transport"
-mortar_temperature = "mortar_temperature"
 mortar_tracer = "mortar_tracer"
 
 # %% Loop over the gb, and set initial and default data
 
 # Permeabilities
 matrix_permeability = 1e-15
-#fracture_permeability = 1e1
 interfacial_permeability = 1e2
-
-# Some temperature param
-init_temp = 573.15 # in K; i.e. 300 C
-bc_temp = 523.15 # 250 C
-
-init_equil_const = equil_constants(gb, temp=init_temp)
-bc_equil_const = equil_constants(gb, temp=init_temp)
-init_equil_const *= equil_consts_plummer
-bc_equil_const *= equil_consts_plummer
 
 # Initial uniform pressure
 init_pressure = 100 # bar
 
 # Some scaling values to help condition the problem
-temp_scale = 1 # 1e-6/init_temp
+temp_scale = 1 
 scalar_scale = 1
 chem_scale = 1
 length_scale = 1 
@@ -146,7 +132,6 @@ for g, d in gb:
                                tot_var:     {"cells": num_components},
                                log_var:     {"cells": num_components},
                                minerals:    {"cells": 2},
-                               temperature: {"cells": 1},
                                tracer:      {"cells": 1} 
                                }
 
@@ -162,12 +147,12 @@ for g, d in gb:
     if gb.dim_max() == g.dim:
         
         so4 = 10 * unity
-        ca = 0.9 / (init_equil_const[4] * so4) * unity
-        co3 = 1 / (init_equil_const[3] * ca) * unity
+        ca = 0.9 / (equil_consts[4] * so4) * unity
+        co3 = 1 / (equil_consts[3] * ca) * unity
         oh = 1.5e3 * unity
-        h = init_equil_const[2] / oh * unity
-        hco3 = init_equil_const[0] * h * co3 * unity
-        hso4 = init_equil_const[1] * h * so4 * unity
+        h = equil_consts[2] / oh * unity
+        hco3 = equil_consts[0] * h * co3 * unity
+        hso4 = equil_consts[1] * h * so4 * unity
     
         # Initally calcite is present, but not anhydrite 
         # But no minerals at the boundary cells
@@ -185,20 +170,20 @@ for g, d in gb:
         
         init_X = np.array([ca, co3, so4, h])
         init_X_log = np.log(init_X)
-        alpha_init = init_equil_const[0:3].reshape(([3,1])) * np.exp(S * init_X_log)
+        alpha_init = equil_consts[0:3].reshape(([3,1])) * np.exp(S * init_X_log)
         init_T = init_X + S.T * alpha_init + E.T * precipitated_init
         
         # Reshape for the calulations
         init_T = init_T.reshape((init_T.size), order="F")
     else: 
-     
-        so4 = 10 * unity
-        ca = 0.9 / (init_equil_const[4] * so4) * unity
-        co3 = 1 / (init_equil_const[3] * ca) * unity 
-        oh = 1.5e3 * unity
-        h = init_equil_const[2] / oh * unity
-        hco3 = init_equil_const[0] * h * co3 * unity
-        hso4 = init_equil_const[1] * h * so4 * unity
+        # Inherrit values  
+        so4 = so4[0]
+        ca = ca[0]
+        co3 = co3[0]
+        oh = oh[0]
+        h = h[0]
+        hco3 = hco3[0]
+        hso4 = hso4[0]
         
         # Have initally calcite present, but not anhydrite 
         precipitated_init = np.zeros((2, g.num_cells))
@@ -207,7 +192,7 @@ for g, d in gb:
         init_X = np.array([ca, co3, so4, h])
         init_X_log = np.log(init_X)
         
-        alpha_init = init_equil_const[0:3].reshape(([3,1])) * np.exp(S*init_X_log)
+        alpha_init = equil_consts[0:3].reshape(([3,1])) * np.exp(S*init_X_log)
         init_T = init_X + S.T * alpha_init + E.T * precipitated_init
         init_T = init_T.reshape((init_T.size), order="F")
     # end if-else
@@ -303,15 +288,15 @@ for g, d in gb:
         bc_values_for_transport = np.zeros(g.num_faces * num_aq_components)
           
         bc_so4 = so4[0]
-        bc_ca = 1 / (bc_equil_const[4] * bc_so4) # Precipitation of CaSO4
-        bc_co3 = 0.5 / (bc_equil_const[3] * bc_ca)# Dissolution of CaCO3
+        bc_ca = 1 / (equil_consts[4] * bc_so4) # Precipitation of CaSO4
+        bc_co3 = 0.5 / (equil_consts[3] * bc_ca)# Dissolution of CaCO3
         bc_oh = oh[0]
-        bc_h = bc_equil_const[2] / bc_oh
-        bc_hso4 = bc_equil_const[1] * bc_h * bc_so4
-        bc_hco3 = bc_equil_const[0] * bc_h * bc_so4
+        bc_h = equil_consts[2] / bc_oh
+        bc_hso4 = equil_consts[1] * bc_h * bc_so4
+        bc_hco3 = equil_consts[0] * bc_h * bc_so4
         
         bc_X = np.array([bc_ca, bc_co3, bc_so4, bc_h])
-        bc_alpha = bc_equil_const[0:3] * np.exp(S*np.log(bc_X))
+        bc_alpha = equil_consts[0:3] * np.exp(S*np.log(bc_X))
         bc_T = bc_X + S.T * bc_alpha 
         
         bc_values_for_transport[expanded_left] = np.tile(bc_T, Ny)
@@ -323,11 +308,6 @@ for g, d in gb:
         bound_for_temp = pp.BoundaryCondition(g, 
                                               faces=bound_faces, 
                                               cond=labels_for_temp)
-
-        # The bc values
-        bc_values_for_temp = np.zeros(g.num_faces)
-        bc_values_for_temp[bound_faces[inflow]] = bc_temp  # in K
-        bc_values_for_temp[bound_faces[outflow]] = init_temp 
         
         # Boundary conditions for the passive tracer
         labels_for_tracer = neu_faces.copy()
@@ -360,31 +340,7 @@ for g, d in gb:
     init_darcy_flux[g.get_internal_faces()] = 1.0
     
     # Calulate the effective heat capacity
-    fluid_density = equations.rho(init_pressure, init_temp)
-    
-    # THe specific heat capacities
-    # We assume temperature is only affected by water and non-reactive mineral
-    # Hence, we put the specifc heat capacites of the minerals to zero
-    specific_heat_capacity_fluid = 4200. # water
-    specific_heat_capacity_solid = 790. # non-reactive mineral
-    shc_caco3 = 0
-    shc_caso4 = 0
-    
-    # Solid (reactive and non-reactive minerals) density, 
-    # "scaled" by the specific heat capacity to simplify the calculations afterwoods
-    # Use sign to account for the presence of minerals
-    solid_density = density_CaCO3 * shc_caco3 * np.sign(precipitated_init[0])
-    solid_density += density_CaSO4 * shc_caso4 * np.sign(precipitated_init[1])
-    
-    if g.dim==gb.dim_max(): # Only non-reactive mineral in the matrix
-        solid_density += 2500 * specific_heat_capacity_solid 
-    # end if
-    
-    effective_heat_capacity = (
-        porosity * fluid_density * specific_heat_capacity_fluid + # fluid part
-        (1-porosity) * solid_density # solid poart
-        )
-
+    fluid_density = equations.rho(init_pressure)
     # --------------------------------- #
 
     # Set the values in dictionaries
@@ -413,22 +369,6 @@ for g, d in gb:
         "num_components": num_aq_components,
         "darcy_flux": init_darcy_flux
     }
-
-    temp_data = {
-        "mass_weight": (
-            (effective_heat_capacity * specific_volume * temp_scale) * unity
-        ),
-        "specific_heat_capacity_fluid": specific_heat_capacity_fluid, 
-        "specific_heat_capacity_solid": specific_heat_capacity_solid,
-        "specific_heat_capacity_caco3": shc_caco3,
-        "specific_heat_capacity_caso4": shc_caso4,
-        "solid_density": solid_density,
-        "initial_temp": init_temp, 
-        "bc_values": bc_values_for_temp,
-        "bc": bound_for_temp,
-        "darcy_flux": init_darcy_flux * temp_scale, 
-        "temp_scale": temp_scale
-    }
     
     passive_tracer_data = {
         "bc_values": bc_values_for_tracer,
@@ -447,8 +387,7 @@ for g, d in gb:
         "length_scale": length_scale,
         "scalar_scale": scalar_scale,
         "chem_scale": chem_scale,
-        "temp_scale" : temp_scale,      
-        "equil_consts": equil_consts_plummer
+        "equil_consts": equil_consts
     }
 
     # --------------------------------- #
@@ -461,8 +400,6 @@ for g, d in gb:
     d[pp.DISCRETIZATION_MATRICES][flow_kw] = {}
     d[pp.PARAMETERS][transport_kw] = transport_data
     d[pp.DISCRETIZATION_MATRICES][transport_kw] = {}
-    d[pp.PARAMETERS][temperature] = temp_data
-    d[pp.DISCRETIZATION_MATRICES][temperature] = {}
     d[pp.PARAMETERS][tracer] = passive_tracer_data
     d[pp.DISCRETIZATION_MATRICES][tracer] = {}
 
@@ -505,7 +442,7 @@ for g, d in gb:
        
         # Between species
         cell_equil_comp = sps.dia_matrix(
-            (np.hstack([init_equil_const[0:3] for i in range(gb.num_cells())]), 0),
+            (np.hstack([equil_consts[0:3] for i in range(gb.num_cells())]), 0),
             shape=(
                 num_secondary_components * gb.num_cells(),
                 num_secondary_components * gb.num_cells(),
@@ -514,7 +451,7 @@ for g, d in gb:
         
         # Between aquoues and precipitating species
         cell_equil_prec = sps.dia_matrix(
-            (np.hstack([init_equil_const[3:5] for i in range(gb.num_cells())]), 0),
+            (np.hstack([equil_consts[3:5] for i in range(gb.num_cells())]), 0),
             shape=(
                 E.shape[0] * gb.num_cells(),
                 E.shape[0] * gb.num_cells(),
@@ -523,8 +460,8 @@ for g, d in gb:
         
         
         d[pp.PARAMETERS][chemistry_kw] = {
-            "equilibrium_constants_comp": init_equil_const[0:3],
-            "equilibrium_constants_prec": init_equil_const[3:5],
+            "equilibrium_constants_comp": equil_consts[0:3],
+            "equilibrium_constants_prec": equil_consts[3:5],
             "cell_equilibrium_constants_comp": cell_equil_comp,
             "cell_equilibrium_constants_prec": cell_equil_prec,
             
@@ -560,7 +497,6 @@ for g, d in gb:
         pressure: init_pressure * unity,
         tot_var: init_T.copy(),
         log_var: log_conc,
-        temperature: init_temp * unity, # in K (ie degree celsius + 273.15)
         tracer: np.zeros(unity.size),
         
         minerals: mineral_per_cell.copy(),
@@ -574,7 +510,6 @@ for g, d in gb:
             pressure: init_pressure * unity,
             tot_var: init_T.copy(),
             log_var: log_conc.copy(),
-            temperature: init_temp * unity, # in K (ie degree celsius + 273.15)
             tracer: np.zeros(unity.size),
             
             minerals: mineral_per_cell.copy(),
@@ -596,7 +531,6 @@ for e, d in gb.edges():
     # Initialize the primary variables and the state in the dictionary
     d[pp.PRIMARY_VARIABLES] = {mortar_pressure:    {"cells": 1},
                                mortar_transport:   {"cells": num_aq_components},
-                               mortar_temperature: {"cells": 1},
                                mortar_tracer:      {"cells": 1}
                                 }
     pp.set_state(d)
@@ -616,13 +550,11 @@ for e, d in gb.edges():
     d[pp.STATE].update({
         mortar_pressure: 0.0 * unity,
         mortar_transport: init_T_aq,
-        mortar_temperature: init_temp * unity,
         mortar_tracer: np.zeros(unity.size),
 
         pp.ITERATE: {
             mortar_pressure: 0.0 * unity,
             mortar_transport: init_T_aq.copy(),
-            mortar_temperature: init_temp * unity,
             mortar_tracer: np.zeros(unity.size)
         }
     })
@@ -632,13 +564,6 @@ for e, d in gb.edges():
                                                 "darcy_flux": unity
                                                 })
 
-    # For temperature, we need the flux
-    d[pp.PARAMETERS][temperature] = {"darcy_flux": unity ,
-                                     #"specific_heat_capacity": unity,
-                                     "init_temp": init_temp
-                                     }
-    d[pp.DISCRETIZATION_MATRICES][temperature] = {}
-    
     # Tracer
     d[pp.PARAMETERS][tracer]={"darcy_flux": unity}
     d[pp.DISCRETIZATION_MATRICES][tracer] = {}
@@ -686,7 +611,7 @@ fields = ["pressure",
           "Ca2+", "CO3", "SO4", "H+", 
           "HCO3", "HSO4", "OH-",
           "CaCO3", "CaSO4", 
-          "passive_tracer","temperature",
+          "passive_tracer",
           "aperture_difference", "ratio_perm"]
 
 time_store = np.array([0.0, 500, 1000, 
@@ -719,7 +644,6 @@ while current_time < 100:
        
         j += 1
         
-        pp.plot_grid(gb, "temperature" , figsize=(15, 12))
         # pp.plot_grid(gb, "CO3" , figsize=(15, 12))
         # pp.plot_grid(gb, "H+" , figsize=(15, 12))
 
@@ -736,12 +660,12 @@ while current_time < 100:
 
 #%% Study teh fluid density
 for g,d in gb:
-    d[pp.STATE]["rho"] = equations.rho(d[pp.STATE]["pressure"],d[pp.STATE]["temperature"])
+    d[pp.STATE]["rho"] = equations.rho(d[pp.STATE]["pressure"])
 
 #%% Store the grid bucket
 gb_list = [gb] 
 folder_name = "to_study/" # Assume this folder exist
-gb_name = "gb_test_grid_3_egc_temperature_scale_faster" 
+gb_name = "gb_grid_3_egc" 
 
 def write_pickle(obj, path):
     """

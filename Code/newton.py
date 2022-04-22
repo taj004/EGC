@@ -17,7 +17,7 @@ import update_param
 
 def update_darcy(gb, dof_manager):
     """
-    Update the darcy flux in the (solute) transport and temperature parameter dictionaries 
+    Update the darcy flux in the parameter dictionaries 
     """
     
     # Get the Ad-fluxes
@@ -41,7 +41,6 @@ def update_darcy(gb, dof_manager):
         x = sign_flux[inds]
         # For the solute transport we only need the signs
         d[pp.PARAMETERS]["transport"]["darcy_flux"] = x.copy()
-        d[pp.PARAMETERS]["temperature"]["darcy_flux"] = x.copy() 
         d[pp.PARAMETERS]["passive_tracer"]["darcy_flux"] = x.copy()
         
         # For the flow, we need the absolute value of the signs
@@ -64,7 +63,6 @@ def update_darcy(gb, dof_manager):
             inds = slice(val, val+nc)
             x = sign_edge_flux[inds]
             d[pp.PARAMETERS]["transport"]["darcy_flux"] = x.copy()
-            d[pp.PARAMETERS]["temperature"]["darcy_flux"] = x.copy() 
             d[pp.PARAMETERS]["flow"]["darcy_flux"] = x.copy()
             d[pp.PARAMETERS]["passive_tracer"]["darcy_flux"] = x.copy()
             val += nc
@@ -315,60 +313,6 @@ def backsubstitution(R, b):
     
     return x
 
-def calculate_residual_error(r, r0, dof_manager, conv_tol=1e-4):
-    "Measure the resudial error for the different states"
-    
-    dof_ind = np.cumsum(np.hstack((0, dof_manager.full_dof)))
-    norm_list = []
-    norm_orig_list = []
-    
-    for key, val in dof_manager.block_dof.items():
-        if isinstance(key[0], tuple) is False:
-            ind = slice(dof_ind[val], dof_ind[val+1])
-            part_r = r[ind]
-            norm_list.append(np.linalg.norm(part_r)) 
-            part_orig_r = r0[ind]
-            norm_orig_list.append(np.linalg.norm(part_orig_r))
-            #print(key[1])
-            #print(np.linalg.norm(part_r)<conv_tol*np.linalg.norm(part_orig_r))
-    # end key,val-loop
-    
-    norm_now = np.asanyarray(norm_list)
-    norm_orig = np.asarray(norm_orig_list)
-    if all(norm_now < conv_tol * norm_orig):
-        conv = True
-    else:
-        conv = False
-    # end if
-    
-    return conv
-
-def calculate_absolute_error(dx, x, dof_manager, conv_tol=1e-4):
-        
-    dof_ind = np.cumsum(np.hstack((0, dof_manager.full_dof)))
-    dist_list = []
-    x_list = []
-    
-    for key, val in dof_manager.block_dof.items():
-        if isinstance(key[0], tuple) is False:
-            ind = slice(dof_ind[val], dof_ind[val+1])
-            d=dx[ind]
-            x_n=x[ind]
-            dist_list.append(np.linalg.norm(d)) 
-            x_list.append(np.linalg.norm(x_n))
-           
-    # end key,val-loop
-    
-    dd = np.asarray(dist_list)
-    xx = np.asarray(x_list)
-    if all(dd < conv_tol * xx):
-        conv = True
-    else:
-        conv = False
-    # end if
-    
-    return conv
-
 def perturbed_Jacobi(J):
     """
     Perturb the Jacobian matrix, if it is ill-conditioned
@@ -409,9 +353,6 @@ def scaling_matrix(dof_manager):
         inds = slice(dof_ind[val], dof_ind[val+1])
         if key[1]=="pressure":
             D[inds] = 1 / 100
-
-        if key[1]=="temperature":
-            D[inds] = 1e-4 / 573.15
     # end key, val-loop
     
     D = sps.diags(D, 
@@ -445,7 +386,6 @@ def newton_gb(gb: pp.GridBucket,
   
     J, resid = equation.assemble_matrix_rhs()
     norm_orig = np.linalg.norm(resid)
-    resid_old = resid.copy()
     print(norm_orig)
     
     # The upper and lower bound
@@ -468,28 +408,14 @@ def newton_gb(gb: pp.GridBucket,
     
     conv = False
     i = 0
-    maxit = 35
+    maxit = 20
     
     flag = 0
-    
-    # Cyclic Newton
-    j = 0
-    p = 1
-    
+      
     # Scaling matrix
     D = scaling_matrix(dof_manager)
     
     while conv is False and i < maxit:
-        #print(i)
-        # if j == 0: 
-        #     if ill_cond or est > 1e10:
-
-        #         lu = spla.splu(H.tocsc())
-        #     else:
-        #         # LU-factorization
-        #         lu = spla.splu(J.tocsc()) 
-        #     end if-else
-        # end if.
         
         # Compute the search direction
         grad_f = J.T.dot(-resid)
@@ -525,9 +451,10 @@ def newton_gb(gb: pp.GridBucket,
         
         x_new = clip_variable(x_new.copy(), dof_manager, target_name, 
                               min_val, max_val) 
+        
         x_new = clip_variable(x_new.copy(), dof_manager, "minerals", 
-                              np.exp(min_val), np.exp(max_val))     
-
+                              np.exp(min_val), np.exp(max_val) )     
+        
         dof_manager.distribute_variable(x_new.copy(), to_iterate=True)
         
         # --------------------- #
@@ -550,7 +477,6 @@ def newton_gb(gb: pp.GridBucket,
         
         # Increase number of steps
         i += 1
-        j += 1
         
         # Update equations
         equation = equations.gather(gb, 
@@ -558,21 +484,8 @@ def newton_gb(gb: pp.GridBucket,
                                     equation_manager=equation,
                                     iterate=True
                                     ) 
-        
-        if j == p:
-            J, resid = equation.assemble_matrix_rhs()
-            j = 0
-        else:
-            resid = equation.assemble_rhs()
-        # end if-else
-            
-        # conv_res = calculate_residual_error(resid, resid_old, dof_manager)
-        # conv_abs = calculate_absolute_error(dx, x_new, dof_manager)
-        # if conv_abs is True or conv_res is True:
-        #     print("Solution reached")
-        #     conv = True
-            
-          
+        J, resid = equation.assemble_matrix_rhs()
+      
         # Measure the error    
         norm_now = np.linalg.norm(resid)
         err_dist = np.linalg.norm(dx, np.inf) 

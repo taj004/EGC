@@ -47,16 +47,16 @@ def solve(gb, dof_manager, equation_manager):
     # Adjust time step, if necessary, while making sure 
     # the time step is not too big nor too small 
     if flag == 0:
-        if newton_iter < 5: # Few Newton steps, increase the time step 
-            data_transport["time_step"] = np.minimum(dt * 2, 0.097)
+        if newton_iter < 4: # Few Newton steps, increase the time step 
+            data_transport["time_step"] = np.minimum(dt * 2, 10.0)
     
-        elif newton_iter > 28: # Used many Newton iterations 
+        elif newton_iter > 15: # Used many Newton iterations 
                                # (or Newton didnt converge in maximum 
                                # number of iterations),  decreace the time step
-            data_transport["time_step"] = np.maximum(dt / 4, 1e-15)
+            data_transport["time_step"] = np.maximum(dt / 5, 1e-15)
         # end if-elif
     else: # flag = 1
-        data_transport["time_step"] = np.maximum(dt / 8, 1e-15)
+        data_transport["time_step"] = np.maximum(dt / 12, 1e-15)
 # end if-else
 
     # Finally, check that the current time step does not make

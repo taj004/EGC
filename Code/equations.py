@@ -1,6 +1,4 @@
 """
-Solve transport equation(s) for transport in fractued porous media
-
 @author: uw
 """
 
@@ -76,53 +74,7 @@ def remove_frac_face_flux(full_flux, gb, dof_manager):
     
     return pp.ad.Array(num_flux)
 
-def to_ad(gb, param_kw, param, size_type="cells", scaling_kw="None"):
-    """
-    Make an Ad-vector of a parameter param, from a param_kw
-    """
-    
-    if size_type=="cells":
-        vec = np.zeros(gb.num_cells())
-    elif size_type=="faces" :
-        vec = np.zeros(gb.num_faces())
-    else:
-        raise ValueError("Unknown size type") 
-    # end if-else
-    
-    val = 0
-    for g,d in gb:
-        
-        if scaling_kw == "None":
-            scaling = 1
-        else:
-            scaling = d[pp.PARAMETERS]["reference"][scaling_kw]
-        # end if
-        
-        if size_type == "cells":
-            num_size = g.num_cells
-        else: 
-            num_size = g.num_faces
-        # end if-else
-        
-        # Extract from the dictionary 
-        x = d[pp.PARAMETERS][param_kw][param] * scaling
-   
-        # Indices
-        inds = slice(val, val+g.num_cells)
-
-        if isinstance(x, np.ndarray) is False:
-            x *= np.ones(g.num_cells)        
-        # end if
-        
-        # Store values and update for the next grid
-        vec[inds] = x.copy() 
-        val += num_size
-        
-    # end g,d-loop
-    
-    return pp.ad.Array(vec)
-
-def rho(p, temp):
+def rho(p):
     """
     Constitutive law between density, pressure and temperatrue
     """
@@ -133,26 +85,20 @@ def rho(p, temp):
     c = 1.0e-9 # compresibility
     p_ref = 100 # reference pressure [bar]
     
-    # Temperatrue variable
-    beta_f = 4e-4
-    temp_ref = 573.15
-    temp_scale = 1 #1e-3 / temp_ref
-    # Clip to avoid possible huge non-physical temperature variations 
-    dt = np.clip(temp-temp_ref, -temp_ref/3, temp_ref/3) 
 
     if isinstance(p, np.ndarray) or isinstance(p, int): # The input variables is a np.array
         # density = rho_f * np.exp(
         #     c * (p - p_ref) * pp.BAR - beta_f * (temp - temp_ref)
         #     )
         density = rho_f * (
-            1 + c*(p-p_ref)*pp.BAR - beta_f*dt
+            1 + c*(p-p_ref)*pp.BAR 
             )
     else: # For the mass conservation equation for the fluid
           
         der = p.diagvec_mul_jac(rho_f * c * pp.BAR * np.ones(p.val.size))
         density = pp.ad.Ad_array(
             val = rho_f * (
-                1 + c*(p.val-p_ref)*pp.BAR - beta_f*dt
+                1 + c*(p.val-p_ref)*pp.BAR
                 ),
             jac=der
             ) 
@@ -199,13 +145,11 @@ def gather(gb,
     pressure = "pressure"
     tot_var = "T" # T: The total concentration of the primary components
     log_var = "log_X" # log_c: Logarithm of C, the aqueous part of the total concentration
-    temperature = "temperature"
     minerals = "minerals"
     tracer = "passive_tracer"
     
     mortar_pressure = "mortar_pressure"
     mortar_tot_var = "mortar_transport"   
-    mortar_temperature = "mortar_temperature"
     mortar_tracer = "mortar_tracer"
     
     # Loop over the gb
@@ -246,10 +190,6 @@ def gather(gb,
         [(g, minerals) for g in grid_list]
         )
     
-    temp = equation_manager.merge_variables(
-        [(g, temperature) for g in grid_list]
-        )
-    
     passive_tracer = equation_manager.merge_variables(
         [(g, tracer) for g in grid_list]
         )
@@ -261,9 +201,6 @@ def gather(gb,
         
         # Transport
         eta = equation_manager.merge_variables([e, mortar_tot_var] for e in edge_list)
-        
-        # Temperature
-        w = equation_manager.merge_variables([e, mortar_temperature] for e in edge_list)
         
         # Passive tracer
         eta_tracer = equation_manager.merge_variables([e, mortar_tracer] for e in edge_list)
@@ -330,11 +267,10 @@ def gather(gb,
     
         mass_density_prev = data_prev_time["mass_density_prev"] # previous time step
         p_prev = data_prev_time["p_prev"] # previous time step
-        temp_prev = data_prev_time["temp_prev"]
     else:
-        # The pressure and temperature at the previous time step
+        # The pressure at the previous time step
         p_prev = p.previous_timestep()
-        temp_prev = temp.previous_timestep()
+
         # Acculmuation for the pressure equation
         mass_density = pp.ad.MassMatrixAd(keyword=flow_kw, grids=grid_list)
         mass_density_prev = pp.ad.MassMatrixAd(keyword=flow_kw, grids=grid_list)
@@ -346,7 +282,7 @@ def gather(gb,
 
     # Wrap the constitutive law into ad, and construct the ad-wrapper of the PDE 
     rho_ad = pp.ad.Function(rho, "density")
-    rho_ad_main = rho_ad(p , temp_prev) 
+    rho_ad_main = rho_ad(p) 
     
     # Build the flux term. 
     # Remember that we need to multiply the fluxes by density. 
@@ -354,12 +290,9 @@ def gather(gb,
     # NOTE: the values in the darcy flux for this variable have to be +1
     # to ensure that the scaling becomes correct
     upwind_weight = pp.ad.UpwindAd(keyword=flow_kw, grids=grid_list)  
-    
-    # The boundary condition for the temperature 
-    bc_temp = pp.ad.BoundaryCondition(keyword=temperature, grids=grid_list)
-    
+     
     # The boundary conditions 
-    rho_ad_bc = rho_ad(bound_flux, bc_temp)
+    rho_ad_bc = rho_ad(bound_flux)
     
     rho_on_face = (
         upwind_weight.upwind * rho_ad_main
@@ -434,7 +367,7 @@ def gather(gb,
     # Construct the conservation equation
     density_wrap = (
         (mass_density.mass * rho_ad_main - 
-         mass_density_prev.mass * rho_ad(p_prev, temp_prev)) / dt 
+         mass_density_prev.mass * rho_ad(p_prev)) / dt 
         + conservation
         ) 
     if len(edge_list)>0:
@@ -484,129 +417,14 @@ def gather(gb,
         data_prev_newton.update({"AD_lam_flux": lam})
     # end if   
     
-#%% The temperatue equtaion. 
-    
+#%% The Passive tracer
+       
     # It is similar to the solute transport equation, which is studied 
     # in detail below, but only applied to one component.
     # The reason I placed the construction of the temperature equation 
     # above the solute transport equation is to avoid having to "redefine"
-    # the div and the mortar_projection operators
+    # the div, the mortar_projection, etc operators
   
-    if iterate:
-        heat_capacity = pp.ad.MassMatrixAd(keyword=temperature, grids=grid_list)
-        heat_capacity_prev = data_prev_time["heat_capacity_prev"]
-    else:       
-        # Acculmuation for the temerature equation
-        heat_capacity = pp.ad.MassMatrixAd(keyword=temperature, grids=grid_list)
-        heat_capacity_prev = pp.ad.MassMatrixAd(keyword=temperature, grids=grid_list)
-        
-        # Store for the Newton calculations
-        data_prev_time["temp_prev"] = temp_prev
-        data_prev_time["heat_capacity_prev"] = heat_capacity_prev
-    # end if-else
-
-    upwind_temp = pp.ad.UpwindAd(keyword=temperature, grids=grid_list)
-    if len(edge_list) > 0:        
-        upwind_coupling_temp = pp.ad.UpwindCouplingAd(keyword=temperature, edges=edge_list)
-    # end if
-    
-    # For the flux part of the temperature equation,
-    # multiply temperature with the fluid density
-    specific_heat_cells = to_ad(gb, 
-                                param_kw=temperature, 
-                                param="specific_heat_capacity_fluid",
-                                scaling_kw="None"
-                                )
- 
-    specific_heat_faces = to_ad(gb, 
-                                param_kw=temperature, 
-                                param="specific_heat_capacity_fluid", 
-                                size_type="faces",
-                                scaling_kw="None"
-                                )
-    temp_density = (
-     temp * 
-     rho_ad(p.previous_iteration(), temp.previous_iteration()) * 
-     specific_heat_cells
-     )
-    
-    bc_temp_density = rho_ad_bc * specific_heat_faces
-    
-    abs_full_flux = repeat(full_flux, 1, gb, dof_manager)
-    
-    # AD-wrapper of the temperature equation
-    temp_wrap = (
-        (heat_capacity.mass * temp - heat_capacity_prev.mass * temp_prev) / dt
-        
-        + div * (
-            (upwind_temp.upwind * temp_density) * abs_full_flux
-            )
-        
-        - div * (
-            (upwind_temp.rhs * bc_temp_density * bc_temp) * abs_full_flux
-            )
-        
-        - div * (
-            (upwind_temp.outflow_neumann * temp_density) * abs_full_flux
-            )
-        ) 
-    
-    # Include the projections
-    if len(edge_list) > 0:
-        
-        temp_wrap += ( 
-            trace.inv_trace * mortar_projection.mortar_to_primary_int * w
-            )
-        temp_wrap -=(
-            mortar_projection.mortar_to_secondary_int * w
-            )
-
-        # Finally, the temperature over the interface  
-        # Some tools we need
-        upwind_coupling_flux = upwind_coupling_temp.flux
-        upwind_coupling_primary = upwind_coupling_temp.upwind_primary
-        upwind_coupling_secondary = upwind_coupling_temp.upwind_secondary
-        abs_lam = repeat(lam, 1, gb, dof_manager)
-        
-        # First project the temperature from high to low
-        trace_of_temp = trace.trace * temp_density
-        
-        high_to_low = (
-            upwind_coupling_flux * 
-            upwind_coupling_primary * 
-            mortar_projection.primary_to_mortar_avg *  
-            trace_of_temp
-            ) 
-        
-        # Next project temperature from lower onto higher dimension
-        low_to_high = (
-            upwind_coupling_flux * 
-            upwind_coupling_secondary * 
-            mortar_projection.secondary_to_mortar_avg * 
-            temp_density
-            ) 
-        
-        # Finally we have the temperature over the interface
-        temp_over_interface = (
-            upwind_coupling_temp.mortar_discr * w 
-            - (high_to_low + low_to_high) * abs_lam
-            )    
-    # end if
-
-    # Finally, give the equations to AD:
-    if len(edge_list) > 0:
-        temp_eq = pp.ad.Expression(temp_wrap, dof_manager, name="temperature")
-        temp_eq_interface = pp.ad.Expression(temp_over_interface, dof_manager, name="temperature_over_interface")
-        
-        temp_eq.discretize(gb)
-        temp_eq_interface.discretize(gb)
-    else:
-        temp_eq = pp.ad.Expression(temp_wrap, dof_manager, name="temperature")
-        temp_eq.discretize(gb)
-    # end if-else
-    
-#%% The Passive tracer
-   
     # Upwind discretization for advection.
     upwind_tracer = pp.ad.UpwindAd(keyword=tracer, grids=grid_list)
     if len(edge_list) > 0:
@@ -642,6 +460,7 @@ def gather(gb,
     # 2) Advection
     # 3) Boundary condition for inlet
     # 4) boundary condition for outlet.
+    abs_full_flux = repeat(full_flux, 1, gb, dof_manager)
 
     tracer_wrapper = (
         (mass_tracer.mass * passive_tracer - mass_tracer_prev.mass * tracer_prev) / dt
@@ -702,7 +521,7 @@ def gather(gb,
             ) 
         
         # Finally we have the transport over the interface equation
-        #abs_lam = repeat(lam, 1,gb, dof_manager)
+        abs_lam = repeat(lam, 1, gb, dof_manager)
         tracer_over_interface_wrapper = (
              upwind_tracer_coupling.mortar_discr * eta_tracer 
                - (high_to_low_tracer + low_to_high_tracer) * abs_lam
@@ -786,7 +605,8 @@ def gather(gb,
         mass = pp.ad.MassMatrixAd(mass_kw, grid_list)
         mass_prev = pp.ad.MassMatrixAd(mass_kw, grid_list) 
        
-        # The solute solution at time step n, ie. the one we need to use to fine the solution at time step n+1
+        # The solute solution at time step n, 
+        # ie. the one we need to use to fine the solution at time step n+1
         T_prev = T.previous_timestep() 
         
         # Store for Newton iterations
@@ -934,11 +754,7 @@ def gather(gb,
     
     def phi_min(mineral_conc, log_primary):
       """
-      Evaluation of the min function
-      
-      The inputs becomes 
-      conc -> Ad_array (val, jac)
-      conc.previous_iteration() -> np.ndarray. 
+      Evaluation of the min function 
       """
       sec_conc = 1 - cell_equil_prec * pp.ad.exp(cell_E * log_primary)
       Fa, Fi = F_matrix(mineral_conc.val, sec_conc.val)
@@ -958,8 +774,6 @@ def gather(gb,
                                       transport_eq_interface, 
                                       equilibrium_eq,
                                       mineral_eq,
-                                      temp_eq, 
-                                      temp_eq_interface,
                                       tracer_eq,
                                       tracer_eq_interface
                                       ]
@@ -968,7 +782,6 @@ def gather(gb,
                                       transport_eq, 
                                       equilibrium_eq,
                                       mineral_eq,
-                                      temp_eq,
                                       tracer_eq
                                       ]
     # end if-else

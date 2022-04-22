@@ -8,176 +8,6 @@ import porepy as pp
 import scipy.sparse as sps
 from equations import rho
 
-def equil_constants(gb, temp=None):
-    """
-    Calculate the equilibirum constants for a given temperature
-    """
-    
-    R = 8.314 # Gas constant
-    
-    # Standard enthaply values
-    hco3 =-691.1
-    h = 0
-    co3 = -676.3
-    hso4 = -885.75
-    so4 = -907.5
-    oh = -229.94
-    h2o = -285.8
-    caco3 = -1206.9
-    ca = -542.96
-    caso4 = -1432.69
-    
-    # The enthalpy energy for the reactions
-    delta_H = np.array([
-        h   + co3 - hco3,
-        h   + so4 - hso4,
-        h2o - h   - oh  , 
-        ca  + co3 - caco3,
-        ca  + so4 - caso4 
-        ]) * 1e3  # The above values have unit [kJ/mol] 
-    
-    gb_2d = gb.grids_of_dimension(gb.dim_max())[0]
-    data = gb.node_props(gb_2d)
-    
-    temp_scale = 1 
-    
-    if temp is None: # Not a temperature is given, meaning we are in Newton iterations
-    
-        shape = gb.num_cells() * delta_H.size
-        vec = np.zeros(shape)  
-        # Idea: Loop over the gb, and fill in cell-wise. Then return as a sparse matrix.
-        
-        val = 0
-        for g,d in gb:
-             
-            if g.dim == gb.dim_max():
-                data = d
-            # end if
-            
-            # Cell-wise Gibbs energy for the calculations below
-            cell_delta_H = np.tile(delta_H, g.num_cells)
-        
-            # The temperature
-            t = d[pp.STATE][pp.ITERATE]["temperature"]
-                
-            # Expand the temperature for the calculation
-            temp =  np.repeat(t, repeats=delta_H.shape)
-          
-            # Temperature factor
-            ref_temp = d[pp.PARAMETERS]["temperature"]["initial_temp"] 
-           
-            #temp_factor = (temp-ref_temp) /(temp*ref_temp) 
-            dt = np.clip(temp-ref_temp, a_min=-ref_temp/3, a_max=ref_temp/3) 
-            
-            ref_eq = d[pp.PARAMETERS]["reference"]["equil_consts"] 
-            ref_eq = np.tile(ref_eq, g.num_cells)
-           
-            # Taylor approximation for stability purposes
-            c = cell_delta_H / R 
-            taylor = ( 
-                1 + 
-                c * dt / (ref_temp **2)
-                + c * (c-2*ref_temp) /(2 * ref_temp**4) * np.power(dt, 2)
-                )
-            
-            # Calulate the equilibrium constants
-            cell_equil_consts = ref_eq * taylor
-            #np.exp((cell_delta_H / R) * temp_factor)
-            
-            # Return
-            inds = slice(val, val+g.num_cells*delta_H.size) 
-            vec[inds] = cell_equil_consts
-            
-            # For the next grid
-            val += g.num_cells * delta_H.size
-        # end g,d-loop
-            
-        # Splitt the equilibrium constants for components 
-        # and precipitation species
-        x1 = np.zeros(gb.num_cells() * 3, dtype=int)
-        x2 = np.zeros(gb.num_cells() * 2, dtype=int)
-        for i in range(gb.num_cells()):
-            j = i * 5
-            inds1 = np.array([j, j+1, j+2]) 
-            inds2 = np.array([j+3, j+4])
-            
-            x1[3*i:3*i+3] = inds1
-            x2[2*i:2*i+2] = inds2
-        # end i-loop
-        
-        cell_equil_comp = vec[x1]
-        cell_equil_prec = vec[x2]
-        
-        
-        data["parameters"]["chemistry"].update({
-            "cell_equilibrium_constants_comp": sps.diags(cell_equil_comp),
-            "cell_equilibrium_constants_prec": sps.diags(cell_equil_prec)
-            })
-        
-        return
-    
-    else: # This part is ment to calculate the exponential part 
-          # at a given (scalar) temperature  
-        ref_temp = 573.15 # Initial temp 
-        
-        #temp_factor = (temp-ref_temp) /(temp * ref_temp)
-        #exponential_part = np.exp(delta_H/R * temp_factor)
-        
-        dt = np.clip(temp-ref_temp, a_min=-ref_temp/3, a_max=ref_temp/3)
-        c = delta_H/R   
-        taylor = (
-            1+ 
-            c * dt / (ref_temp**2) 
-            + c*(c-2*ref_temp) * dt **2 / (2 * ref_temp**4) 
-            )
-        return taylor
-    # end if
-    
-def update_bc(gb):
-        """Update the inflow boundary conditions for the chemical concentrations"""
-        
-        # Grid information    
-        g = gb.grids_of_dimension(gb.dim_max())[0]
-        d = gb.node_props(g)    
-        
-        num_aq_components = d[pp.PARAMETERS]["transport"]["aqueous_components"].size
-        S = d[pp.PARAMETERS]["chemistry"]["stoic_coeff_S"]
-        
-        # Left side of the grid
-        cc = g.cell_centers[0]
-        dx = 2 * np.min (cc) # np.min(g.cell_diameter()) # for unstructerd grids, g.cell_diameters gives ... 
-        left = cc < g.bounding_box()[0][0] + dx
-        
-        temp_l = d[pp.STATE][pp.ITERATE]["temperature"][left]
-        bc_equil_const = equil_constants(gb, temp_l[0]) # The temperature is identical at the left-hand side
-        bc_equil_const *= d[pp.PARAMETERS]["reference"]["equil_consts"]
-        
-        # Boundary conditions
-        bound_faces = g.tags["domain_boundary_faces"].nonzero()[0]
-        bound_faces_centers = g.face_centers[:, bound_faces]
-        # The inflow in the domain
-        inflow = bound_faces_centers[0] < g.bounding_box()[0][0] + 1e-4
-       
-        expanded_left = pp.fvutils.expand_indices_nd(bound_faces[inflow], num_aq_components)
-        Ny = bound_faces[inflow].size
-        bc_values = np.zeros(g.num_faces * num_aq_components)
-          
-        bc_so4 = d[pp.PARAMETERS]["concentration"]["init_SO4"] 
-        bc_ca = 1 / (bc_equil_const[4] * bc_so4) # Precipitation of CaSO4
-        bc_co3 = 0.5 / (bc_equil_const[3] * bc_ca) # Dissolution of CaCO3
-        bc_oh = d[pp.PARAMETERS]["concentration"]["init_OH-"]
-        bc_h = bc_equil_const[2] / bc_oh
-        bc_hso4 = bc_equil_const[1] * bc_h * bc_so4
-        bc_hco3 = bc_equil_const[0] * bc_h * bc_co3
-        
-        bc_X = np.array([bc_ca, bc_co3, bc_so4, bc_h])
-        bc_alpha = np.array([bc_hco3, bc_hso4, bc_oh])
-        bc_T = bc_X + S.T * bc_alpha 
-        
-        bc_values[expanded_left] = np.tile(bc_T, Ny)
-        
-        d[pp.PARAMETERS]["transport"].update({"bc_values": bc_values})
-
 def matrix_perm(phi, ref_phi, ref_perm):
     """
     The matrix permeability
@@ -247,8 +77,6 @@ def update_mass_weight(gb):
     The porosity is updated as "porosity = 1 - sum_m x_m",
     where x_m is the mth volume mineral fraction 
     
-    The heat capacity is updated using the new porosity 
-    and fluid density
     """
     for g,d in gb:
         
@@ -293,30 +121,6 @@ def update_mass_weight(gb):
             "mass_weight": porosity.copy() * specific_volume.copy()
             })
         
-        
-        # Next, iterate on the effective heat caapcity
-        d_temp = d[pp.PARAMETERS]["temperature"]
-        specific_heat_capacity_fluid = d_temp["specific_heat_capacity_fluid"]
-        specific_heat_capacity_solid = d_temp["specific_heat_capacity_solid"]        
-        shc_caco3 = d_temp["specific_heat_capacity_caco3"]
-        shc_caso4 = d_temp["specific_heat_capacity_caso4"] 
-     
-        solid_density = 0        
-        if g.dim == gb.dim_max():
-            solid_density += 2500 * specific_heat_capacity_solid 
-        # end if
-        
-        fluid_density = rho(d[pp.STATE][pp.ITERATE]["pressure"], 
-                            d[pp.STATE][pp.ITERATE]["temperature"])
-        
-        effective_heat_capacity = (
-            porosity.copy() * fluid_density * specific_heat_capacity_fluid + # fluid part
-            (1-porosity.copy()) * solid_density # solid poart
-            )
-       # print(effective_heat_capacity)
-        d_temp.update({
-            "mass_weight": effective_heat_capacity * specific_volume.copy() 
-            })
         
         
 def update_interface(gb):
@@ -417,10 +221,7 @@ def update_aperture(gb):
         if gb.dim_max()-1 == g.dim :
             ref_param = d[pp.PARAMETERS]["reference"]
          
-            # Calculate the reactive surface area
-            # In this work, we assume we only have very little 
-            # anhydrite (when the precipitation happens), 
-            # thus there is only one reactive surface area
+            # the reactive surface area
             S = ref_param["surface_area"]    
             
             conc_CaCO3 = d[pp.STATE][pp.ITERATE]["CaCO3"]
@@ -450,13 +251,13 @@ def update_aperture(gb):
             
             mineral_width_CaCO3[ind] = mineral_vol_CaCO3[ind] / S[ind]
             mineral_width_CaSO4[ind] = mineral_vol_CaSO4[ind] / S[ind]
-            
+            #breakpoint()
             #initial_aperture = d[pp.PARAMETERS]["mass"]["initial_aperture"]
             open_aperture = d[pp.PARAMETERS]["mass"]["open_aperture"]
             
             aperture = open_aperture - mineral_width_CaCO3 - mineral_width_CaSO4
             
-            # Usefull for debugging
+            # Clip to avoid exactly zero aperture
             aperture = np.clip(aperture, a_min=1e-5, a_max=open_aperture)
             
             d[pp.PARAMETERS]["mass"].update({"aperture": aperture.copy(),
