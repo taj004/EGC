@@ -7,10 +7,10 @@ import porepy as pp
 import scipy.sparse as sps
 
 
-def repeat(v, reps, gb, dof_manager, abs_val=True):
+def repeat(v, reps, gb, dof_manager):
     """
     Repeat a vector v, reps times
-    Main target is the flux vectors, needed in the solute transport calculations 
+    Main target is the flux vectors, in the transport processes  
     """
     # Currently only for ad_arrays
     if isinstance(v, np.ndarray):
@@ -33,13 +33,8 @@ def repeat(v, reps, gb, dof_manager, abs_val=True):
     # Note that we return absolute value of the expanded vectors
     # The reason is these vectors are ment to use as scale values 
     # in the solute transport equation. The signs are handled in the upwind discretization 
-    
-    if abs_val is True:
-        ad_reps = pp.ad.Array(np.abs(num_v_reps))
-    else:
-        ad_reps = pp.ad.Array(num_v_reps)
-    # end if
-    
+    ad_reps = pp.ad.Array(np.abs(num_v_reps))
+
     return  ad_reps
 
 def remove_frac_face_flux(full_flux, gb, dof_manager):
@@ -60,9 +55,6 @@ def remove_frac_face_flux(full_flux, gb, dof_manager):
         
         # To remove the flux at fracture fraces in the lower dimensions,
         # we need to correct the fracture face indexing
-        if gb.dim_max() == g.dim:
-            num_faces_in_2d = g.num_faces
-        correct_index = num_faces_in_2d if gb.dim_max() > g.dim else 0
      
         correct_fracture_faces = is_fracture_faces + val
         val += g.num_faces
@@ -85,31 +77,18 @@ def rho(p):
     c = 1.0e-9 # compresibility
     p_ref = 100 # reference pressure [bar]
     
-
     if isinstance(p, np.ndarray) or isinstance(p, int): # The input variables is a np.array
-        # density = rho_f * np.exp(
-        #     c * (p - p_ref) * pp.BAR - beta_f * (temp - temp_ref)
-        #     )
-        density = rho_f * (
-            1 + c*(p-p_ref)*pp.BAR 
+        density = rho_f * np.exp(
+            c * (p - p_ref) * pp.BAR
             )
     else: # For the mass conservation equation for the fluid
-          
-        der = p.diagvec_mul_jac(rho_f * c * pp.BAR * np.ones(p.val.size))
-        density = pp.ad.Ad_array(
-            val = rho_f * (
-                1 + c*(p.val-p_ref)*pp.BAR
-                ),
-            jac=der
+        density = rho_f * pp.ad.exp(
+            c * (p - p_ref) * pp.BAR 
             ) 
-        
-        # density = rho_f * pp.ad.exp(
-        #    c * (p - p_ref) * pp.BAR - beta_f * (temp-temp_ref)
-        #    ) 
     # end if-else
     return density
 
-    #%%
+#%% Assemble the non-linear equations
     
 def gather(gb, 
             dof_manager,
@@ -130,10 +109,6 @@ def gather(gb,
                     or formed at the start of a time step (False).  
     
     """    
-    #%%
-    
-    # Get the variable keywords
-    #keywords = kw()
     
     # Keywords:
     mass_kw = "mass"

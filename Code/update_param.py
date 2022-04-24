@@ -6,7 +6,6 @@ Update various parameters for the computations
 import numpy as np
 import porepy as pp 
 import scipy.sparse as sps
-from equations import rho
 
 def matrix_perm(phi, ref_phi, ref_perm):
     """
@@ -243,16 +242,12 @@ def update_aperture(gb):
             mineral_vol_CaCO3 = mass_CaCO3 / density_CaCO3 
             mineral_vol_CaSO4 = mass_CaSO4 / density_CaSO4 
             
-            # To ensure we don't divide by zero
-            ind = np.where(S>1e-10)[0]
-            
             mineral_width_CaCO3 = np.zeros(S.size)
             mineral_width_CaSO4 = mineral_width_CaCO3.copy()
             
-            mineral_width_CaCO3[ind] = mineral_vol_CaCO3[ind] / S[ind]
-            mineral_width_CaSO4[ind] = mineral_vol_CaSO4[ind] / S[ind]
-            #breakpoint()
-            #initial_aperture = d[pp.PARAMETERS]["mass"]["initial_aperture"]
+            mineral_width_CaCO3 = mineral_vol_CaCO3 / S
+            mineral_width_CaSO4 = mineral_vol_CaSO4 / S
+         
             open_aperture = d[pp.PARAMETERS]["mass"]["open_aperture"]
             
             aperture = open_aperture - mineral_width_CaCO3 - mineral_width_CaSO4

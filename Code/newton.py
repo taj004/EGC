@@ -349,11 +349,11 @@ def scaling_matrix(dof_manager):
     # Put 1 otherwis
     D = np.ones(dof_manager.num_dofs())
     
-    for key, val in dof_manager.block_dof.items():
-        inds = slice(dof_ind[val], dof_ind[val+1])
-        if key[1]=="pressure":
-            D[inds] = 1 / 100
-    # end key, val-loop
+    # for key, val in dof_manager.block_dof.items():
+    #     inds = slice(dof_ind[val], dof_ind[val+1])
+    #     if key[1]=="pressure":
+    #         D[inds] = 1 / 100
+    # # end key, val-loop
     
     D = sps.diags(D, 
                   shape=(dof_manager.num_dofs(),dof_manager.num_dofs()), 
@@ -408,7 +408,7 @@ def newton_gb(gb: pp.GridBucket,
     
     conv = False
     i = 0
-    maxit = 20
+    maxit = 25
     
     flag = 0
       
@@ -452,8 +452,8 @@ def newton_gb(gb: pp.GridBucket,
         x_new = clip_variable(x_new.copy(), dof_manager, target_name, 
                               min_val, max_val) 
         
-        x_new = clip_variable(x_new.copy(), dof_manager, "minerals", 
-                              np.exp(min_val), np.exp(max_val) )     
+        # x_new = clip_variable(x_new.copy(), dof_manager, "minerals", 
+        #                       np.exp(min_val), np.exp(max_val) )     
         
         dof_manager.distribute_variable(x_new.copy(), to_iterate=True)
         
@@ -462,10 +462,6 @@ def newton_gb(gb: pp.GridBucket,
         
         # Update the Darcy flux in the parameter dictionries
         update_darcy(gb, dof_manager)   
-        
-        # Update temperature dependent parameters 
-        update_param.equil_constants(gb)
-        update_param.update_bc(gb)
         
         # Update concentrations in the dictionary
         update_param.update_concentrations(gb, dof_manager, to_iterate=True)
@@ -490,7 +486,7 @@ def newton_gb(gb: pp.GridBucket,
         norm_now = np.linalg.norm(resid)
         err_dist = np.linalg.norm(dx, np.inf) 
         # Stop if converged. 
-        if norm_now < 1e-4 * norm_orig or err_dist < 1e-6 * np.linalg.norm(x_new, np.inf):
+        if norm_now < 1e-4 * norm_orig or err_dist < 1e-5 * np.linalg.norm(x_new, np.inf):
             print("Solution reached")
             conv = True
         # end if

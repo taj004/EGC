@@ -11,10 +11,9 @@ import porepy as pp
 
 import equations
 from solve_non_linear import solve_eqs
-from update_param import equil_constants
 
 import sys
-sys.path.insert(0, "..")
+sys.path.insert(1, "/home/uw/Documents/THC_fracture")
 import create_mesh
 
 import pickle
@@ -170,20 +169,20 @@ for g, d in gb:
         
         init_X = np.array([ca, co3, so4, h])
         init_X_log = np.log(init_X)
-        alpha_init = equil_consts[0:3].reshape(([3,1])) * np.exp(S * init_X_log)
+        alpha_init = np.array([hco3, hso4, oh])
         init_T = init_X + S.T * alpha_init + E.T * precipitated_init
         
         # Reshape for the calulations
         init_T = init_T.reshape((init_T.size), order="F")
     else: 
         # Inherrit values  
-        so4 = so4[0]
-        ca = ca[0]
-        co3 = co3[0]
-        oh = oh[0]
-        h = h[0]
-        hco3 = hco3[0]
-        hso4 = hso4[0]
+        so4 = so4[0] * unity
+        ca = ca[0] * unity
+        co3 = co3[0] * unity
+        oh = oh[0] * unity
+        h = h[0] * unity
+        hco3 = hco3[0] * unity
+        hso4 = hso4[0] * unity
         
         # Have initally calcite present, but not anhydrite 
         precipitated_init = np.zeros((2, g.num_cells))
@@ -192,7 +191,7 @@ for g, d in gb:
         init_X = np.array([ca, co3, so4, h])
         init_X_log = np.log(init_X)
         
-        alpha_init = equil_consts[0:3].reshape(([3,1])) * np.exp(S*init_X_log)
+        alpha_init = np.array([hco3, hso4, oh])
         init_T = init_X + S.T * alpha_init + E.T * precipitated_init
         init_T = init_T.reshape((init_T.size), order="F")
     # end if-else
@@ -219,8 +218,9 @@ for g, d in gb:
     
     # In the fracture, the aperture is "given by" aperture + mineral width = cell height
     # The mineral width can by computed as volume of the mineral / reactive surface area. 
-    
-    S_0 = 0.3 * np.maximum(dz, g.cell_diameters())  # initial reactive surface area 
+
+    # initial reactive surface area 
+    S_0 = 0.3 * g.cell_volumes
     
     mineral_width_CaCO3 = mineral_vol_CaCO3 / S_0
     mineral_width_CaSO4 = mineral_vol_CaSO4 / S_0
@@ -229,7 +229,7 @@ for g, d in gb:
     aperture = open_aperture - (
         mineral_width_CaCO3 +  mineral_width_CaSO4 
         ) 
-    
+    print(aperture)
     #aperture = np.power(1e-3, gb.dim_max()>g.dim) * unity
     specific_volume = np.power(aperture, gb.dim_max()-g.dim)
     
@@ -606,7 +606,7 @@ equation_manager = equations.gather(gb,
                                     equation_manager=equation_manager)
 
 #%% Prepere for exporting
-#to_paraview = pp.Exporter(gb, file_name="conc_test_grid_3", folder_name="for_EGC")
+to_paraview = pp.Exporter(gb, file_name="vars_to_egc", folder_name="for_EGC")
 fields = ["pressure",
           "Ca2+", "CO3", "SO4", "H+", 
           "HCO3", "HSO4", "OH-",
@@ -614,19 +614,11 @@ fields = ["pressure",
           "passive_tracer",
           "aperture_difference", "ratio_perm"]
 
-time_store = np.array([0.0, 500, 1000, 
-                       2000, 3500, 5000, 
-                       6000, 8500, 10000, 
-                       25000, 50000,
-                       75000, 100000])
-j=0
-
 current_time = data_2d[pp.PARAMETERS]["transport"]["current_time"]
-
+final_time = data_2d[pp.PARAMETERS]["transport"]["current_time"]
 #%% Time loop
-while current_time < 100:
-    
-   # print(conc_dict["CaCO3"])
+while current_time < final_time:
+
     print(f"Current time {current_time}")
 
     # Solve
@@ -639,33 +631,14 @@ while current_time < 100:
                                         iterate=False)
 
     current_time = data_2d[pp.PARAMETERS]["transport"]["current_time"]
-
-    if j < len(time_store) and np.abs(current_time-time_store[j]) < 0.1 :
-       
-        j += 1
-        
-        # pp.plot_grid(gb, "CO3" , figsize=(15, 12))
-        # pp.plot_grid(gb, "H+" , figsize=(15, 12))
-
-        #pp.plot_grid(gb, pressure, figsize=(15, 12))
-        
-        #pp.plot_grid(gb, "CaCO3" , figsize=(15, 12))
-        #to_paraview.write_vtu(fields, time_step = 0)
-    # end if
-    
 # end time-loop
 
-#to_paraview.write_pvd(time_store)
-
-
-#%% Study teh fluid density
-for g,d in gb:
-    d[pp.STATE]["rho"] = equations.rho(d[pp.STATE]["pressure"])
+to_paraview.write_vtu(fields, time_step = final_time)
 
 #%% Store the grid bucket
 gb_list = [gb] 
 folder_name = "to_study/" # Assume this folder exist
-gb_name = "gb_grid_3_egc" 
+gb_name = "gb_egc" 
 
 def write_pickle(obj, path):
     """
@@ -679,13 +652,13 @@ def write_pickle(obj, path):
 
 write_pickle(gb_list,folder_name + gb_name)
 
-#%% Plotting
+#%% Plot time step and number of Newton iterations
 newton_steps = data_2d[pp.PARAMETERS]["previous_newton_iteration"]["Number_of_Newton_iterations"]
 time_steps = data_2d[pp.PARAMETERS]["previous_time_step"]["time_step"] 
 
 newton_steps = np.asarray(newton_steps)
 time_steps = np.asarray(time_steps)
-time_points = np.linspace(0, 5, newton_steps.size, endpoint=True)
+time_points = np.linspace(0, final_time, newton_steps.size, endpoint=True)
 
 vals_to_store = np.column_stack(
     (
@@ -695,10 +668,9 @@ vals_to_store = np.column_stack(
       )
     )
 
-# file_name = folder_name + "temporal_vals_test_grid_3" 
-# np.savetxt(file_name + ".csv", vals_to_store, 
-#             delimiter=",", header="time_points, newton_steps, time_steps")
-
+file_name = folder_name + "temporal_vals" 
+np.savetxt(file_name + ".csv", vals_to_store, 
+            delimiter=",", header="time_points, newton_steps, time_steps")
 
 fig, (ax1,ax2) = plt.subplots(ncols=1, nrows=2, sharex=True, figsize=(15,12))
 ax1.plot(time_points, newton_steps, "ko-")
