@@ -345,8 +345,7 @@ def scaling_matrix(dof_manager):
     """
     
     dof_ind = np.cumsum(np.hstack((0, dof_manager.full_dof)))
-    # We are primarily interesed in scaling the temperature part,
-    # Put 1 otherwis
+ 
     D = np.ones(dof_manager.num_dofs())
     
     # for key, val in dof_manager.block_dof.items():
@@ -408,12 +407,12 @@ def newton_gb(gb: pp.GridBucket,
     
     conv = False
     i = 0
-    maxit = 25
+    maxit = 30
     
     flag = 0
       
     # Scaling matrix
-    D = scaling_matrix(dof_manager)
+    #D = scaling_matrix(dof_manager)
     
     while conv is False and i < maxit:
         
@@ -423,13 +422,13 @@ def newton_gb(gb: pp.GridBucket,
         if ill_cond or est > 1e10: 
             H = perturbed_Jacobi(J)
             b = -grad_f
-            DH=D*H
-            Db=D*b
-            dx = spla.spsolve(DH,Db, use_umfpack=False)            
+           # DH=D*H
+           # Db=D*b
+            dx = spla.spsolve(H, b, use_umfpack=False)            
         else:
-            DJ = D*J
-            Dr = D*resid
-            dx = spla.spsolve(DJ, Dr, use_umfpack=False) 
+           # DJ = D*J
+           # Dr = D*resid
+            dx = spla.spsolve(J, resid, use_umfpack=False) 
         # end if-else
        
         # Solution from prevous iteration step
@@ -451,9 +450,6 @@ def newton_gb(gb: pp.GridBucket,
         
         x_new = clip_variable(x_new.copy(), dof_manager, target_name, 
                               min_val, max_val) 
-        
-        # x_new = clip_variable(x_new.copy(), dof_manager, "minerals", 
-        #                       np.exp(min_val), np.exp(max_val) )     
         
         dof_manager.distribute_variable(x_new.copy(), to_iterate=True)
         
@@ -486,7 +482,8 @@ def newton_gb(gb: pp.GridBucket,
         norm_now = np.linalg.norm(resid)
         err_dist = np.linalg.norm(dx, np.inf) 
         # Stop if converged. 
-        if norm_now < 1e-4 * norm_orig or err_dist < 1e-5 * np.linalg.norm(x_new, np.inf):
+        if norm_now < 1e-6 * norm_orig or norm_now < 1e-6 or \
+            err_dist < 1e-7 * np.linalg.norm(x_new, np.inf):
             print("Solution reached")
             conv = True
         # end if

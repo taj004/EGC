@@ -75,7 +75,7 @@ num_components = num_aq_components + num_fixed_components
 num_secondary_components = S.shape[0]
 
 # Define fractures and a gb
-dx, dy, dz = 0.13, 0.13, 0.13
+dx, dy, dz = 0.12, 0.12, 0.12 #0.11, 0.12, 0.11
 
 mesh_args = {"mesh_size_frac" : dx,
              "mesh_size_bound": dy,
@@ -107,11 +107,11 @@ mortar_tracer = "mortar_tracer"
 # %% Loop over the gb, and set initial and default data
 
 # Permeabilities
-matrix_permeability = 1e-15
+matrix_permeability = 1e-13
 interfacial_permeability = 1e2
 
 # Initial uniform pressure
-init_pressure = 100 # bar
+init_pressure = 1000 # Pa;  1e-1 # bar
 
 # Some scaling values to help condition the problem
 temp_scale = 1 
@@ -175,7 +175,7 @@ for g, d in gb:
         # Reshape for the calulations
         init_T = init_T.reshape((init_T.size), order="F")
     else: 
-        # Inherrit values  
+        # Inherit values  
         so4 = so4[0] * unity
         ca = ca[0] * unity
         co3 = co3[0] * unity
@@ -208,7 +208,8 @@ for g, d in gb:
     mass_CaCO3 = mol_CaCO3 * 100.09 * 0.001 # the "100.09" is molar mass, g/mol
     mass_CaSO4 = mol_CaSO4 * 136.15 * 0.001 # "0.001" convert g to kg
 
-    # Densitys from  ...
+    # Densitys from
+    # https://doi.org/10.1016/B978-0-08-100404-3.00004-4
     density_CaCO3 = 2.71e3  # kg/m^3
     density_CaSO4 = 2.97e3  # kg/m^3
 
@@ -220,8 +221,8 @@ for g, d in gb:
     # The mineral width can by computed as volume of the mineral / reactive surface area. 
 
     # initial reactive surface area 
-    S_0 = 0.3 * g.cell_volumes
-    
+    S_0 =  np.power(g.cell_volumes, 2/3)
+
     mineral_width_CaCO3 = mineral_vol_CaCO3 / S_0
     mineral_width_CaSO4 = mineral_vol_CaSO4 / S_0
     
@@ -229,8 +230,7 @@ for g, d in gb:
     aperture = open_aperture - (
         mineral_width_CaCO3 +  mineral_width_CaSO4 
         ) 
-    print(aperture)
-    #aperture = np.power(1e-3, gb.dim_max()>g.dim) * unity
+    #print(aperture)
     specific_volume = np.power(aperture, gb.dim_max()-g.dim)
     
     dynamic_viscosity = 1e-3
@@ -245,7 +245,7 @@ for g, d in gb:
     else:
         K = np.power(aperture, 2) / 12
     # end if-else
-
+    print(K*init_pressure/dynamic_viscosity)
     # --------------------------------- #
 
     # Boundary conditions
@@ -268,7 +268,7 @@ for g, d in gb:
 
         # Set the BC values for flow
         bc_values_for_flow = np.zeros(g.num_faces)
-        bc_values_for_flow[bound_faces[inflow]] = 7*init_pressure  
+        bc_values_for_flow[bound_faces[inflow]] = 7 * init_pressure  
         bc_values_for_flow[bound_faces[outflow]] = init_pressure
         bound_for_flow = pp.BoundaryCondition(g, 
                                               faces=bound_faces, 
@@ -358,7 +358,7 @@ for g, d in gb:
         "mass_weight": porosity * specific_volume.copy(),
         "bc_values": bc_values_for_flow,
         "bc": bound_for_flow,
-        "permeability": K * pp.BAR * specific_volume.copy() / dynamic_viscosity,
+        "permeability": K * specific_volume.copy() / dynamic_viscosity,
         "darcy_flux": init_darcy_flux,
         "dynamic_viscosity": dynamic_viscosity
     }
@@ -472,9 +472,9 @@ for g, d in gb:
         }
 
         d[pp.PARAMETERS][transport_kw].update({
-            "time_step": 5e-3 / 1, 
+            "time_step": 5e-4, 
             "current_time": 0,
-            "final_time": 5*pp.DAY,
+            "final_time": 7 * pp.DAY,
             "aqueous_components": aq_components
         })
         d[pp.PARAMETERS]["grid_params"] = {}
@@ -606,7 +606,9 @@ equation_manager = equations.gather(gb,
                                     equation_manager=equation_manager)
 
 #%% Prepere for exporting
-to_paraview = pp.Exporter(gb, file_name="vars_to_egc", folder_name="for_EGC")
+to_paraview = pp.Exporter(gb, file_name="vars_to_egc", folder_name="for_EGC_and_sigs")
+time_store = np.array([1., 2., 3., 4., 5., 6., 7.]) * pp.DAY
+j=0
 fields = ["pressure",
           "Ca2+", "CO3", "SO4", "H+", 
           "HCO3", "HSO4", "OH-",
@@ -615,9 +617,9 @@ fields = ["pressure",
           "aperture_difference", "ratio_perm"]
 
 current_time = data_2d[pp.PARAMETERS]["transport"]["current_time"]
-final_time = data_2d[pp.PARAMETERS]["transport"]["current_time"]
+final_time = data_2d[pp.PARAMETERS]["transport"]["final_time"]
 #%% Time loop
-while current_time < final_time:
+while current_time < 100000:
 
     print(f"Current time {current_time}")
 
@@ -631,18 +633,23 @@ while current_time < final_time:
                                         iterate=False)
 
     current_time = data_2d[pp.PARAMETERS]["transport"]["current_time"]
+    
+    if j < len(time_store) and np.abs(current_time - time_store[j]) < 10:
+        j+=1
+        to_paraview.write_vtu(fields, time_step = current_time)
+    # end if
 # end time-loop
 
-to_paraview.write_vtu(fields, time_step = final_time)
+#to_paraview.write_vtu(fields, time_step = final_time)
 
 #%% Store the grid bucket
 gb_list = [gb] 
 folder_name = "to_study/" # Assume this folder exist
-gb_name = "gb_egc" 
+gb_name = "gb_egc_new_pressure_mat_perm_10_power_13" 
 
 def write_pickle(obj, path):
     """
-    Store the current grid bucket for the convergence study
+    Store the current grid bucket for possible later use
     """
     path = Path(path)
     raw = pickle.dumps(obj)

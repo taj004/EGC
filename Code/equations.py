@@ -75,15 +75,15 @@ def rho(p):
     
     # Pressure related variable
     c = 1.0e-9 # compresibility
-    p_ref = 100 # reference pressure [bar]
+    p_ref = 1e3 # reference pressure [Pa]
     
     if isinstance(p, np.ndarray) or isinstance(p, int): # The input variables is a np.array
         density = rho_f * np.exp(
-            c * (p - p_ref) * pp.BAR
+            c * (p - p_ref) 
             )
     else: # For the mass conservation equation for the fluid
         density = rho_f * pp.ad.exp(
-            c * (p - p_ref) * pp.BAR 
+            c * (p - p_ref) 
             ) 
     # end if-else
     return density

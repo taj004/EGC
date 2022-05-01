@@ -58,7 +58,7 @@ def update_perm(gb):
         dynamic_viscocity = d[pp.PARAMETERS]["flow"]["dynamic_viscosity"]
         
         d[pp.PARAMETERS]["flow"].update({
-            "permeability": K * specific_volume * pp.BAR / dynamic_viscocity
+            "permeability": K * specific_volume / dynamic_viscocity
             }) 
         
         # We are also interested in the current permeability,
@@ -124,7 +124,7 @@ def update_mass_weight(gb):
         
 def update_interface(gb):
     """
-    Update the interfacial permeability, following
+    Update the interface permeability, following
     https://github.com/IvarStefansson/A-fully-coupled-numerical-model-of-thermo-hydro-mechanical-processes-and-fracture-contact-mechanics-
     """
 
@@ -234,7 +234,7 @@ def update_aperture(gb):
             mass_CaCO3 = mol_CaCO3 * 100.09 * 0.001 # the "100.09" is molar mass, g/mol
             mass_CaSO4 = mol_CaSO4 * 136.15 * 0.001
         
-            # Densitys from     
+            # Mineral densitys    
             density_CaCO3 = 2.71e3  # g/m^3
             density_CaSO4 = 2.97e3 # g/m^3
                                                 
@@ -252,8 +252,8 @@ def update_aperture(gb):
             
             aperture = open_aperture - mineral_width_CaCO3 - mineral_width_CaSO4
             
-            # Clip to avoid exactly zero aperture
-            aperture = np.clip(aperture, a_min=1e-5, a_max=open_aperture)
+            # Clip to avoid exactly zero aperture (can cause singular Jacobian)
+            aperture = np.clip(aperture, a_min=1e-6, a_max=open_aperture)
             
             d[pp.PARAMETERS]["mass"].update({"aperture": aperture.copy(),
                                              "specific_volume": aperture.copy()})
