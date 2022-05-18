@@ -33,13 +33,13 @@ def update_perm(gb):
         d_ref = d[pp.PARAMETERS]["reference"]
         if g.dim == gb.dim_max(): # At the matrix
             ref_phi = d_ref["porosity"]
-            ref_perm = d_ref["permeability"]
+            ref_perm = d_ref["permeability_aperture_scaled"]
             phi = d[pp.PARAMETERS]["mass"]["porosity"]
             
             K = matrix_perm(phi, ref_phi, ref_perm)
             
         else : # In the fracture and intersections
-            ref_perm = d_ref["permeability"]
+            ref_perm = d_ref["permeability_aperture_scaled"]
             
             aperture = d[pp.PARAMETERS]["mass"]["aperture"]
             length_scale = d_ref["length_scale"]
@@ -63,7 +63,7 @@ def update_perm(gb):
         
         # We are also interested in the current permeability,
         # compared to the initial one
-        d[pp.STATE].update({"ratio_perm": K/ref_perm})
+        d[pp.STATE].update({"ratio_perm": K*specific_volume/ref_perm})
         
     # end g,d-loop    
     
@@ -133,7 +133,6 @@ def update_interface(gb):
         gl, gh = gb.nodes_of_edge(e)
         data_l = gb.node_props(gl)
         aperture = data_l[pp.PARAMETERS]["mass"]["aperture"]
-        open_aperture = data_l[pp.PARAMETERS]["mass"]["open_aperture"]
         
         Vl = specific_vol(gb, gl)
         Vh = specific_vol(gb, gh) 
@@ -272,7 +271,8 @@ def update(gb):
     # Update at intersection points 
     if gb.dim_min() == gb.dim_max()-2:
         update_specific_volumes(gb)
-        
+    # end if
+    
     # Update porosity
     update_mass_weight(gb)
     

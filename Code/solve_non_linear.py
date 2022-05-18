@@ -48,7 +48,7 @@ def solve(gb, dof_manager, equation_manager):
     # the time step is not too big nor too small 
     if flag == 0:
         if newton_iter < 5: # Few Newton steps, increase the time step 
-            data_transport["time_step"] = np.minimum(dt * 2, 20.0)
+            data_transport["time_step"] = np.minimum(dt * 2, 30.0)
     
         elif newton_iter > 22: # Used many Newton iterations 
                                # (or Newton didnt converge in maximum 
@@ -84,7 +84,6 @@ def solve_eqs(gb, dof_manager, equation_manager):
     Returns 
     -------
     gb, dof_manager, equation_manager
-
     """
     solve(gb, dof_manager, equation_manager)
     update_concentrations(gb, dof_manager)

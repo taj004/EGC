@@ -12,12 +12,44 @@ import porepy as pp
 import equations
 from solve_non_linear import solve_eqs
 
-import sys
-sys.path.insert(1, "/home/uw/Documents/THC_fracture")
-import create_mesh
-
 import pickle
 from pathlib import Path
+
+#%% The grid
+
+def create_mesh(mesh_args):
+    """
+    Create the computational domain EGC.
+    The (physical) domain 2x0.5
+    
+    Input:
+        mesh_args: dict parameters for discretization
+        scale: int, scaling parameters for the domain size. It is assumed that
+        mesh_args and scale are compatible, i.e. mismatches are the users fault
+    
+    Return:
+        a grid bucket
+    """
+    pts = np.array([[0.6, 0.2], # End pts 
+                    [0.2, 0.8], # Statring pts
+                     
+                    [0.6, 0.6],
+                    [0.2, 0.5],
+                    
+                    [1.2, 0.6],
+                    [0.9, 0.8],
+                     
+                    [1.7, 0.3],
+                    [1.0, 0.2],
+                    ]).T
+                
+    e = np.array([[0,1],[2,3], [4,5], [6,7]]).T
+    domain = {"xmin" :0.0, "xmax": 2.0, 
+              "ymin" :0.0, "ymax": 1.0}
+    network_2d = pp.FractureNetwork2d(pts, e, domain)
+    gb = network_2d.mesh(mesh_args)
+    
+    return gb
 
 # %% Initialize variables related to the chemistry and the domain
 
@@ -75,12 +107,12 @@ num_components = num_aq_components + num_fixed_components
 num_secondary_components = S.shape[0]
 
 # Define fractures and a gb
-dx, dy, dz = 0.12, 0.12, 0.12 #0.11, 0.12, 0.11
+dx, dy, dz = 0.12, 0.12, 0.12 
 
 mesh_args = {"mesh_size_frac" : dx,
              "mesh_size_bound": dy,
              "mesh_size_min"  : dz}
-gb = create_mesh.forEGC_test_3(mesh_args)
+gb = create_mesh(mesh_args)
 
 domain = {"xmin": 0, "xmax": gb.bounding_box()[1][0],
           "ymin": 0, "ymax": gb.bounding_box()[1][1]} # domain
@@ -125,8 +157,6 @@ for g, d in gb:
     d["is_tangential"] = True
 
     # Initialize the primary variable dictionaries
-    # For some reason, equation.py had some unknown (atleast to me) issues with keywords.
-    # My solution was to initial the keyword primary variables as below
     d[pp.PRIMARY_VARIABLES] = {pressure:    {"cells": 1},
                                tot_var:     {"cells": num_components},
                                log_var:     {"cells": num_components},
@@ -155,7 +185,7 @@ for g, d in gb:
     
         # Initally calcite is present, but not anhydrite 
         # But no minerals at the boundary cells
-        # (I experienced some issues at the boundary, eg. extreme precipitation, 
+        # (The author experienced some issues at the boundary, e.g. extreme precipitation, 
         # precipitation at outflow bc before the solutes are comming there etc)
         cc = g.cell_centers[0]
         ss = 2 * np.min(cc)
@@ -217,9 +247,6 @@ for g, d in gb:
     mineral_vol_CaCO3 = mass_CaCO3 / density_CaCO3 
     mineral_vol_CaSO4 = mass_CaSO4 / density_CaSO4 
     
-    # In the fracture, the aperture is "given by" aperture + mineral width = cell height
-    # The mineral width can by computed as volume of the mineral / reactive surface area. 
-
     # initial reactive surface area 
     S_0 =  np.power(g.cell_volumes, 2/3)
 
@@ -230,7 +257,7 @@ for g, d in gb:
     aperture = open_aperture - (
         mineral_width_CaCO3 +  mineral_width_CaSO4 
         ) 
-    #print(aperture)
+    
     specific_volume = np.power(aperture, gb.dim_max()-g.dim)
     
     dynamic_viscosity = 1e-3
@@ -245,7 +272,7 @@ for g, d in gb:
     else:
         K = np.power(aperture, 2) / 12
     # end if-else
-    print(K*init_pressure/dynamic_viscosity)
+
     # --------------------------------- #
 
     # Boundary conditions
@@ -381,6 +408,7 @@ for g, d in gb:
     reference_data = {
         "porosity": porosity.copy(),
         "permeability": K.copy(),
+        "permeability_aperture_scaled": K.copy() * specific_volume.copy(),
         "aperture": aperture.copy(),
         "surface_area": S_0,
         "mass_weight": porosity.copy() * specific_volume.copy(),
@@ -433,7 +461,8 @@ for g, d in gb:
                                            "permeability": K.copy(),
                                            "aperture": aperture.copy()}
 
-    # Set some data only in the highest dimension, in order to avoid techical issues later on
+    # Set some information only in the highest dimension, 
+    # in order to avoid techical issues later on
     if g.dim == gb.dim_max():
 
         # Make block matrices of S_W and equilibrium constants, one block per cell.
@@ -606,7 +635,7 @@ equation_manager = equations.gather(gb,
                                     equation_manager=equation_manager)
 
 #%% Prepere for exporting
-to_paraview = pp.Exporter(gb, file_name="vars_to_egc", folder_name="for_EGC_and_sigs")
+to_paraview = pp.Exporter(gb, file_name="vars_to_egc", folder_name="to_study")
 time_store = np.array([1., 2., 3., 4., 5., 6., 7.]) * pp.DAY
 j=0
 fields = ["pressure",
@@ -618,8 +647,9 @@ fields = ["pressure",
 
 current_time = data_2d[pp.PARAMETERS]["transport"]["current_time"]
 final_time = data_2d[pp.PARAMETERS]["transport"]["final_time"]
+
 #%% Time loop
-while current_time < 100000:
+while current_time < final_time:
 
     print(f"Current time {current_time}")
 
@@ -645,7 +675,7 @@ while current_time < 100000:
 #%% Store the grid bucket
 gb_list = [gb] 
 folder_name = "to_study/" # Assume this folder exist
-gb_name = "gb_egc_new_pressure_mat_perm_10_power_13" 
+gb_name = "gb_for_egc" 
 
 def write_pickle(obj, path):
     """
@@ -657,9 +687,9 @@ def write_pickle(obj, path):
         raw = f.write(raw) 
     return
 
-write_pickle(gb_list,folder_name + gb_name)
+write_pickle(gb_list, gb_name)
 
-#%% Plot time step and number of Newton iterations
+#%% Store time step and number of Newton iterations
 newton_steps = data_2d[pp.PARAMETERS]["previous_newton_iteration"]["Number_of_Newton_iterations"]
 time_steps = data_2d[pp.PARAMETERS]["previous_time_step"]["time_step"] 
 
@@ -679,16 +709,3 @@ file_name = folder_name + "temporal_vals"
 np.savetxt(file_name + ".csv", vals_to_store, 
             delimiter=",", header="time_points, newton_steps, time_steps")
 
-fig, (ax1,ax2) = plt.subplots(ncols=1, nrows=2, sharex=True, figsize=(15,12))
-ax1.plot(time_points, newton_steps, "ko-")
-ax1.tick_params(axis="y", labelsize=16,)
-ax1.set_title("Newton iterations")
-
-ax2.semilogy(time_points, time_steps, "ko-")
-ax2.tick_params(axis="y", labelsize=16)
-ax2.set_title("Time steps")
-
-ticks_val = np.array([0, 1, 2, 3, 4, 5]) 
-plt.xticks(ticks=ticks_val, 
-            labels=ticks_val , fontsize=16)
-plt.show()

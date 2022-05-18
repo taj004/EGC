@@ -32,7 +32,8 @@ def repeat(v, reps, gb, dof_manager):
     # Wrap the array in Ad.
     # Note that we return absolute value of the expanded vectors
     # The reason is these vectors are ment to use as scale values 
-    # in the solute transport equation. The signs are handled in the upwind discretization 
+    # in the solute transport equation. 
+    # The signs are handled in the darcy_flux  
     ad_reps = pp.ad.Array(np.abs(num_v_reps))
 
     return  ad_reps
@@ -68,7 +69,7 @@ def remove_frac_face_flux(full_flux, gb, dof_manager):
 
 def rho(p):
     """
-    Constitutive law between density, pressure and temperatrue
+    Constitutive law between density and pressure 
     """
     # reference density 
     rho_f = 1.0e3 
@@ -276,7 +277,6 @@ def gather(gb,
         ) 
 
     # Ad wrapper of Mpfa discretization
-    #mpfa = pp.ad.MpfaAd(flow_kw, grids=grid_list) 
     mpfa = pp.ad.TpfaAd(flow_kw, grids=grid_list) 
     
     # The interior and boundary fluxes
@@ -739,7 +739,8 @@ def gather(gb,
     ad_min_1 = pp.ad.Function(phi_min, "")
     mineral_eq = pp.ad.Expression(ad_min_1(precipitate, log_X), dof_manager, "minerals")
 
-    #%% The last step is to feed the equations to the equation manager and return the non-linear equations
+    #%% The last step is to feed the equations to the equation manager 
+    #   and return the non-linear equations
     equation_manager.equations.clear()
     
     if len(edge_list) > 0:

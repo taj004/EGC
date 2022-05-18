@@ -8,7 +8,6 @@ using Newton's method and the AD-framework in PorePy
 """
 
 import numpy as np
-import scipy.sparse as sps
 import scipy.sparse.linalg as spla
 import porepy as pp
 
@@ -117,7 +116,6 @@ def backtrack(equation, dof_manager,
         # If the first Wolfe condition is satisfied, we stop
         f_new = phi_new.copy()
         if f_new < f_k + alpha*c_1*dot:
-            #print(alpha)
             break
         # end if
     
@@ -177,187 +175,6 @@ def backtrack(equation, dof_manager,
     # end i-loop
         
     return flag
-
-def backtrack_2(equation, dof_manager,
-                grad_f, p_k, x_k, f_0,
-                maxiter=5, min_tol=1e-3):
-    """
-    Compute a stp size, using backtracing
-
-    """
-    # Initialize variables
-    c_1 = 1e-4
-    alpha = 1.0 # initial step size
-    dot = grad_f.dot(p_k)
-
-    # The function to be minimized    
-    def phi(alpha):
-        dof_manager.distribute_variable(x_k + alpha*p_k, to_iterate=True)
-        F_new = equation.assemble_rhs()
-        phi_step = 0.5*F_new.dot(F_new)
-        return phi_step
-    
-    # Variables
-    f_k = f_0     
-    rho = 0.5
-    phi_old = phi(alpha) 
-    phi_new = phi_old.copy()
-    
-    for i in range(maxiter):
-        
-        # If the first Wolfe condition is satisfied, we stop
-        f_new = phi_new.copy()
-        if f_new < f_k + alpha*c_1*dot:
-            break
-        # end if
-        
-        # Upper and lower bounds
-        u = 0.5 * alpha
-        l = 0.1 * alpha
-        
-        # Compute the new step size
-        alpha *= rho
-        alpha = min(u, max(alpha, l)) 
-        phi_new = phi(alpha)
-        
-        # Check if norm(alpha*p_k) is small. Stop if yes.
-        # In such a case we might expect convergence
-        if  np.linalg.norm(alpha*p_k) < min_tol:
-            break
-        # end if
-        
-    # end i-loop
-        
-    return 
-
-#@profile
-def cond_est(R):
-    """
-    Estimate the L1-condtion number of a matrix, using the R-factor from the QR-factorization    
-    
-    Parameters
-    ----------
-    R: Upper triangular matrix
-    
-    Return
-    ----------
-    est: An estimate of the condition number
-    """    
-    # Get the size on R. It should be nxn
-    n = R.shape[0]
-    
-    # Initialize variables
-    x, p = np.zeros(n), np.zeros(n)
-    pm = np.zeros(n)
-    est = R[0,0]
-    
-    for j in range(1,n):     
-        temp = np.abs(R[j, j]) + np.abs(R[0:j-1, j]).sum()
-        est = np.maximum(temp, est)        
-    # end j-loop
-    
-    x[0] = 1/est 
-    
-    i = np.arange(1,n)
-    p[i] = R[0,i]*x[0]
-    
-    
-    # Main loop
-    for j in range(1,n):
-        # Select ej and compute xj
-        xp = (1-p[j]) / R[j,j]
-        xm = (-1-p[j]) / R[j,j]
-        temp_xp = np.abs(xp)
-        temp_xm = np.abs(xm)
-        
-        i = np.arange(j+1,n)
-        abs_R = np.abs(R[i,i])
-        pm[i] = p[i] + R[j,i]*xm
-        temp_xm += np.sum(np.abs(pm[i]) / abs_R) 
-        p[i] = p[i] + R[j,i]*xp
-        temp_xp += np.sum(np.abs(p[i]) / abs_R)
-        
-        if temp_xp >= temp_xm : # ej=1
-            x[j] = xp 
-        else :                  # ej=-1
-            x[j] = xm
-            p[i] = pm[i]
-        # end if-else
-        
-    # end j-loop
-    
-    xnorm = np.abs(x).sum()
-    est = est/xnorm
-    
-    # Solve a linear system
-    x = backsubstitution(R, x)
-    
-    xnorm = np.abs(x).sum()
-    est = est*xnorm        
-    
-    return est
-
-def backsubstitution(R, b):
-    """
-    Backsubstitution to solve a linear trianglar system of equations
-    """
-    
-    n = b.size    
-    x = np.zeros(n)
-    
-    for i in range(n-1, -1,-1):
-        j = np.arange(i+1, n)
-        b[i] -= np.dot(R[i,j], x[j])
-        x[i] = b[i] / R[i,i]
-    # end i-loop
-    
-    return x
-
-def perturbed_Jacobi(J):
-    """
-    Perturb the Jacobian matrix, if it is ill-conditioned
-    """
-    m,n = J.shape
-    
-    if m != n:
-        raise ValueError("Jacobian is not square")
-    # end if
-    
-    I = sps.eye(m) 
-    J_dot_J = J.T.dot(J)
-    
-    Htemp = J_dot_J.A
-    Hnorm = Htemp[0,].sum()
-    
-    for i in range(1,n):
-        j1, j2 = slice(1,i), slice(i+1,n)
-        temp = Htemp[j1,i].sum() + Htemp[i,j2].sum() 
-        Hnorm = max(Hnorm, temp)
-    # end i-loop
-    
-    H = J_dot_J + np.sqrt(n * 2.2e-16) * Hnorm * I 
-    
-    return H
-
-def scaling_matrix(dof_manager):
-    """
-    Create a diagonal scaling matrix 
-    """
-    
-    dof_ind = np.cumsum(np.hstack((0, dof_manager.full_dof)))
- 
-    D = np.ones(dof_manager.num_dofs())
-    
-    # for key, val in dof_manager.block_dof.items():
-    #     inds = slice(dof_ind[val], dof_ind[val+1])
-    #     if key[1]=="pressure":
-    #         D[inds] = 1 / 100
-    # # end key, val-loop
-    
-    D = sps.diags(D, 
-                  shape=(dof_manager.num_dofs(),dof_manager.num_dofs()), 
-                  format="csr")
-    return D
     
 def newton_gb(gb: pp.GridBucket, 
               equation: pp.ad.EquationManager,
@@ -391,51 +208,23 @@ def newton_gb(gb: pp.GridBucket,
     min_val = clip_low_and_up[0]
     max_val = clip_low_and_up[1]
       
-    # Check if the Jacobian is badly conditioned
-    # R = np.linalg.qr(J.A, mode="r") 
-
-    # if True in (np.abs(R.diagonal()) < 1e-8) :
-    #     ill_cond = True
-    #     est = 0
-    # else :
-    #     ill_cond = False
-    #     est = cond_est(R)  
-    # # end if-else 
-    
-    ill_cond=False
-    est=1e2
-    
     conv = False
     i = 0
     maxit = 30
     
     flag = 0
-      
-    # Scaling matrix
-    #D = scaling_matrix(dof_manager)
     
     while conv is False and i < maxit:
         
         # Compute the search direction
-        grad_f = J.T.dot(-resid)
-      
-        if ill_cond or est > 1e10: 
-            H = perturbed_Jacobi(J)
-            b = -grad_f
-           # DH=D*H
-           # Db=D*b
-            dx = spla.spsolve(H, b, use_umfpack=False)            
-        else:
-           # DJ = D*J
-           # Dr = D*resid
-            dx = spla.spsolve(J, resid, use_umfpack=False) 
-        # end if-else
-       
+        dx = spla.spsolve(J, resid, use_umfpack=False) 
+    
         # Solution from prevous iteration step
         x_prev = dof_manager.assemble_variable(from_iterate=True)
-        f_0 = 0.5 * resid.dot(resid)
-        
+       
         # Step size
+        grad_f = J.T.dot(-resid)
+        f_0 = 0.5 * resid.dot(resid)
         flag=backtrack(equation, dof_manager, grad_f, dx, x_prev, f_0)
         
         # New solution
@@ -482,8 +271,8 @@ def newton_gb(gb: pp.GridBucket,
         norm_now = np.linalg.norm(resid)
         err_dist = np.linalg.norm(dx, np.inf) 
         # Stop if converged. 
-        if norm_now < 1e-6 * norm_orig or norm_now < 1e-6 or \
-            err_dist < 1e-7 * np.linalg.norm(x_new, np.inf):
+        if norm_now < 1e-7 * norm_orig or norm_now < 1e-6 or \
+            err_dist < 1e-8 * np.linalg.norm(x_new, np.inf):
             print("Solution reached")
             conv = True
         # end if
