@@ -20,15 +20,12 @@ from pathlib import Path
 def create_mesh(mesh_args):
     """
     Create the computational domain EGC.
-    The (physical) domain 2x0.5
+    The (physical) domain 2x1
     
     Input:
         mesh_args: dict parameters for discretization
-        scale: int, scaling parameters for the domain size. It is assumed that
-        mesh_args and scale are compatible, i.e. mismatches are the users fault
-    
     Return:
-        a grid bucket
+        gb: a grid bucket
     """
     pts = np.array([[0.6, 0.2], # End pts 
                     [0.2, 0.8], # Statring pts
@@ -619,10 +616,10 @@ edge_list = [e for e,_ in gb.edges()]
 data_2d[pp.PARAMETERS]["grid_params"].update({
     "grid_list": grid_list,
     "edge_list": edge_list,
-    "mortar_projection_single": pp.ad.MortarProjections(gb, nd=1),
-    "mortar_projection_several": pp.ad.MortarProjections(gb, nd=num_components),
-    "trace_single": pp.ad.Trace(gb, grid_list, nd=1),
-    "trace_several": pp.ad.Trace(gb, grid_list, nd=num_components),
+    "mortar_projection_single": pp.ad.MortarProjections(gb, edges=edge_list, grids=grid_list, nd=1),
+    "mortar_projection_several": pp.ad.MortarProjections(gb, edges=edge_list, grids=grid_list, nd=num_components),
+    "trace_single": pp.ad.Trace(grid_list, nd=1),
+    "trace_several": pp.ad.Trace(grid_list, nd=num_components),
     "divergence_single": pp.ad.Divergence(grid_list, dim=1),
     "divergence_several": pp.ad.Divergence(grid_list, dim=num_aq_components)
     })
@@ -635,7 +632,7 @@ equation_manager = equations.gather(gb,
                                     equation_manager=equation_manager)
 
 #%% Prepere for exporting
-to_paraview = pp.Exporter(gb, file_name="vars_to_egc", folder_name="to_study")
+#to_paraview = pp.Exporter(gb, file_name="vars_to_egc", folder_name="to_study")
 time_store = np.array([1., 2., 3., 4., 5., 6., 7.]) * pp.DAY
 j=0
 fields = ["pressure",
@@ -649,7 +646,7 @@ current_time = data_2d[pp.PARAMETERS]["transport"]["current_time"]
 final_time = data_2d[pp.PARAMETERS]["transport"]["final_time"]
 
 #%% Time loop
-while current_time < final_time:
+while current_time < 1000:
 
     print(f"Current time {current_time}")
 
@@ -666,7 +663,7 @@ while current_time < final_time:
     
     if j < len(time_store) and np.abs(current_time - time_store[j]) < 10:
         j+=1
-        to_paraview.write_vtu(fields, time_step = current_time)
+        #to_paraview.write_vtu(fields, time_step = current_time)
     # end if
 # end time-loop
 

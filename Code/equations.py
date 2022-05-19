@@ -18,7 +18,7 @@ def repeat(v, reps, gb, dof_manager):
     # end if    
     
     # Get expression for evaluation and check attributes 
-    expression_v = pp.ad.Expression(v, dof_manager).to_ad(gb)
+    expression_v = v.evaluate(dof_manager)
     if isinstance(expression_v, np.ndarray):
         num_v = expression_v
     elif hasattr(expression_v, "val"):
@@ -41,7 +41,7 @@ def repeat(v, reps, gb, dof_manager):
 def remove_frac_face_flux(full_flux, gb, dof_manager):
     """Put the fluxes at the fracture faces to zero"""
     
-    num_flux = pp.ad.Expression(full_flux, dof_manager).to_ad(gb)
+    num_flux = full_flux.evaluate( dof_manager)
     if hasattr(num_flux, "val"):
         num_flux = num_flux.val
     # end if
@@ -108,9 +108,8 @@ def gather(gb,
                       information about the equations
     iterate : bool, whether the equations are updated in the Newton iterations (True),
                     or formed at the start of a time step (False).  
-    
     """    
-    
+    #%%
     # Keywords:
     mass_kw = "mass"
     flow_kw = "flow"
@@ -211,11 +210,8 @@ def gather(gb,
     equil_ad = pp.ad.Function(equilibrium_all_cells, "equil")
     
     # Finally, make it into an Expression which can be evaluated.
-    equilibrium_eq = pp.ad.Expression(equil_ad(T, log_X, precipitate),
-                                      dof_manager, 
-                                      "equilibrium"
-                                      ) 
-    
+    equilibrium_eq = equil_ad(T, log_X, precipitate)
+    equilibrium_eq.set_name("equilibrium")
     #%% The flow equation 
    
     # Compute the second order tensor
@@ -272,8 +268,8 @@ def gather(gb,
     
     rho_on_face = (
         upwind_weight.upwind * rho_ad_main
-        + upwind_weight.rhs * rho_ad_bc
-        + upwind_weight.outflow_neumann * rho_ad_main
+        + upwind_weight.bound_transport_dir * rho_ad_bc
+        + upwind_weight.bound_transport_neu * rho_ad_bc
         ) 
 
     # Ad wrapper of Mpfa discretization
@@ -361,25 +357,24 @@ def gather(gb,
         
         # The interface flux, lambda
         interface_flux = (
-            robin.mortar_scaling * (
+            robin.mortar_discr * (
               pressure_trace_from_high - pressure_from_low
                 )
-            + robin.mortar_discr * lam 
+            + lam 
             )
     # end if
     
     # Make equations, feed them to the AD-machinery and discretize
     if len(edge_list) > 0:
         # Conservation equation
-        flow_eq = pp.ad.Expression(density_wrap, dof_manager, "flow")
-        flow_eq.discretize(gb)
-        
+        density_wrap.discretize(gb)
+        density_wrap.set_name("fluid_conservation")
         # Flux over the interface
-        flow_eq_interface = pp.ad.Expression(interface_flux, dof_manager, "flow_over_interface") 
-        flow_eq_interface.discretize(gb)
+        interface_flux.discretize(gb)
+        interface_flux.set_name("interface_flux")
     else:
-        flow_eq = pp.ad.Expression(density_wrap, dof_manager, "flow") 
-        flow_eq.discretize(gb)
+        density_wrap.discretize(gb)
+        density_wrap.set_name("fluid_conservation")
     # end if-else
     
      # For later use, remove the flux on the fracture faces manually
@@ -442,17 +437,11 @@ def gather(gb,
         
         # advection    
         + div * (
-            (upwind_tracer.upwind * passive_tracer) * abs_full_flux
-                )
-        
-        - div * (
-            (upwind_tracer.rhs * bc_tracer) * abs_full_flux
+            (upwind_tracer.upwind * passive_tracer) * abs_full_flux 
+            - upwind_tracer.bound_transport_dir * abs_full_flux * bc_tracer
+            - upwind_tracer.bound_transport_neu * bc_tracer
             )
-        
-        - div * (
-            (upwind_tracer.outflow_neumann * passive_tracer) * abs_full_flux
-            )
-    )
+        )
     
     # Add the projections 
     if len(edge_list) > 0:
@@ -481,7 +470,7 @@ def gather(gb,
         trace_of_tracer = trace.trace * passive_tracer
                                                     
         high_to_low_tracer = (
-            upwind_tracer_coupling_flux *
+            #upwind_tracer_coupling_flux *
             upwind_tracer_coupling_primary * 
             mortar_projection.primary_to_mortar_avg *  
             trace_of_tracer
@@ -489,7 +478,7 @@ def gather(gb,
         
         # Next project concentration from lower onto higher dimension
         low_to_high_tracer = (
-            upwind_tracer_coupling_flux * 
+            #upwind_tracer_coupling_flux * 
             upwind_tracer_coupling_secondary * 
             mortar_projection.secondary_to_mortar_avg * 
             passive_tracer
@@ -504,15 +493,13 @@ def gather(gb,
     # end if
     
     if len(edge_list) > 0:
-        tracer_eq = pp.ad.Expression(tracer_wrapper, dof_manager, name="tracer")
-        tracer_eq_interface = pp.ad.Expression(tracer_over_interface_wrapper, 
-                              dof_manager, name="interface_tracer")
-        
-        tracer_eq.discretize(gb)
-        tracer_eq_interface.discretize(gb)
+        tracer_wrapper.discretize(gb)
+        tracer_wrapper.set_name("passive_tracer")
+        tracer_over_interface_wrapper.discretize(gb)
+        tracer_over_interface_wrapper.set_name("tracer_interface_flux")
     else:
-        tracer_eq = pp.ad.Expression(tracer_wrapper, dof_manager, name="tracer")
-        tracer_eq.discretize(gb)
+        tracer_wrapper.discretize(gb)
+        tracer_wrapper.set_name("passive_tracer")
     # end if-else
         
 #%% Next, the (solute) transport equations.
@@ -608,15 +595,9 @@ def gather(gb,
         
         # advection    
         + all_2_aquatic.transpose() * div * (
-            (upwind.upwind * all_2_aquatic * log2lin(log_X)) * expanded_flux 
-                )
-        
-        - all_2_aquatic.transpose() * div * (
-            (upwind.rhs * bc_c) * expanded_flux
-            )
-        
-        - all_2_aquatic.transpose() * div * (
-            (upwind.outflow_neumann * all_2_aquatic * T) * expanded_flux
+            upwind.upwind * all_2_aquatic * log2lin(log_X) * expanded_flux 
+            - upwind.bound_transport_dir * expanded_flux * bc_c 
+            - upwind.bound_transport_neu * bc_c # FIXME should possibly scale with the flux here, upwind consist only of sign
             )
     ) 
     
@@ -703,16 +684,14 @@ def gather(gb,
             )  
     # end if
     
-    if len(edge_list) > 0:
-        transport_eq = pp.ad.Expression(transport, dof_manager, name="transport")
-        transport_eq_interface = pp.ad.Expression(transport_over_interface, 
-                              dof_manager, name="transport_over_interface")
-        
-        transport_eq.discretize(gb)
-        transport_eq_interface.discretize(gb)
+    if len(edge_list) > 0:    
+        transport.discretize(gb)
+        transport.set_name("solute_transport")
+        transport_over_interface.discretize(gb)
+        transport_over_interface.set_name("interface_transport")
     else:
-        transport_eq = pp.ad.Expression(transport, dof_manager, name="transport")
-        transport_eq.discretize(gb)
+        transport.discretize(gb)
+        transport.set_name("solute_transport")
     # end if-else
     
 #%% The last equation is mineral precipitation-dissolution
@@ -737,29 +716,30 @@ def gather(gb,
       return eq
     
     ad_min_1 = pp.ad.Function(phi_min, "")
-    mineral_eq = pp.ad.Expression(ad_min_1(precipitate, log_X), dof_manager, "minerals")
-
+    mineral_eq = ad_min_1(precipitate, log_X)
+    mineral_eq.set_name("dissolution_and_precipitation")
+    
     #%% The last step is to feed the equations to the equation manager 
     #   and return the non-linear equations
     equation_manager.equations.clear()
     
     if len(edge_list) > 0:
-        equation_manager.equations = [flow_eq,  
-                                      flow_eq_interface,                 
-                                      transport_eq,  
-                                      transport_eq_interface, 
-                                      equilibrium_eq,
-                                      mineral_eq,
-                                      tracer_eq,
-                                      tracer_eq_interface
-                                      ]
+        equation_manager.equations = {"fluid_conservation": density_wrap,  
+                                      "interface_flux": interface_flux,                 
+                                      "solute_transport": transport,  
+                                      "interface_transport": transport_over_interface, 
+                                      "equilibrium": equilibrium_eq,
+                                      "dissolution_and_precipitation": mineral_eq,
+                                      "passive_tracer": tracer_wrapper,
+                                      "tracer_interface_flux": tracer_over_interface_wrapper
+                                      }
     else:
-        equation_manager.equations = [flow_eq,   
-                                      transport_eq, 
-                                      equilibrium_eq,
-                                      mineral_eq,
-                                      tracer_eq
-                                      ]
+        equation_manager.equations = {"fluid_conservation": density_wrap,   
+                                      "solute_transport": transport, 
+                                      "equilibrium": equilibrium_eq,
+                                      "dissolution_and_precipitation": mineral_eq,
+                                      "passive_tracer": tracer_wrapper
+                                      }
     # end if-else
                     
     return equation_manager

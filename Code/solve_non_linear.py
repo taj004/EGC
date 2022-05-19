@@ -57,7 +57,7 @@ def solve(gb, dof_manager, equation_manager):
         # end if-elif
     else: # flag = 1
         data_transport["time_step"] = np.maximum(dt / 12, 1e-15)
-# end if-else
+    # end if-else
 
     # Finally, check that the current time step does not make
     # next time point excced the final time
