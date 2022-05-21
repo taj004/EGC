@@ -63,8 +63,8 @@ def solve(gb, dof_manager, equation_manager):
     # next time point excced the final time
     
     if flag == 0 and current_time + dt > data_transport["final_time"]:
-            dt = data_transport["final_time"] - current_time
-            data_transport["time_step"] = dt
+        dt = data_transport["final_time"] - current_time
+        data_transport["time_step"] = dt
     # end if
     
     data_transport["current_time"] = current_time

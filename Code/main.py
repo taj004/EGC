@@ -6,7 +6,6 @@ Main script
 # %% Import the neseccary packages
 import numpy as np
 import scipy.sparse as sps
-import matplotlib.pyplot as plt
 import porepy as pp
 
 import equations
