@@ -109,7 +109,7 @@ def gather(gb,
     iterate : bool, whether the equations are updated in the Newton iterations (True),
                     or formed at the start of a time step (False).  
     """    
-    #%%
+    
     # Keywords:
     mass_kw = "mass"
     flow_kw = "flow"
@@ -597,7 +597,7 @@ def gather(gb,
         + all_2_aquatic.transpose() * div * (
             upwind.upwind * all_2_aquatic * log2lin(log_X) * expanded_flux 
             - upwind.bound_transport_dir * expanded_flux * bc_c 
-            - upwind.bound_transport_neu * bc_c # FIXME should possibly scale with the flux here, upwind consist only of sign
+            - upwind.bound_transport_neu * bc_c
             )
     ) 
     
