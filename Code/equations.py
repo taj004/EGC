@@ -7,7 +7,7 @@ import porepy as pp
 import scipy.sparse as sps
 
 
-def repeat(v, reps, gb, dof_manager):
+def repeat(v, reps, dof_manager):
     """
     Repeat a vector v, reps times
     Main target is the flux vectors, in the transport processes  
@@ -78,7 +78,7 @@ def rho(p):
     c = 1.0e-9 # compresibility
     p_ref = 1e3 # reference pressure [Pa]
     
-    if isinstance(p, np.ndarray) or isinstance(p, int): # The input variables is a np.array
+    if isinstance(p, (int,np.ndarray)): # The input variables is a np.array
         density = rho_f * np.exp(
             c * (p - p_ref) 
             )
@@ -92,10 +92,10 @@ def rho(p):
 #%% Assemble the non-linear equations
     
 def gather(gb, 
-            dof_manager,
-            equation_manager,
-            iterate = False
-            ):
+           dof_manager,
+           equation_manager,
+           iterate = False
+           ):
     
     """
     Collect and discretize equations on a GB 
@@ -430,7 +430,7 @@ def gather(gb,
     # 2) Advection
     # 3) Boundary condition for inlet
     # 4) boundary condition for outlet.
-    abs_full_flux = repeat(full_flux, 1, gb, dof_manager)
+    abs_full_flux = repeat(full_flux, 1, dof_manager)
 
     tracer_wrapper = (
         (mass_tracer.mass * passive_tracer - mass_tracer_prev.mass * tracer_prev) / dt
@@ -462,7 +462,6 @@ def gather(gb,
     if len(edge_list) > 0:
         
         # Some tools we need
-        upwind_tracer_coupling_flux = upwind_tracer_coupling.flux
         upwind_tracer_coupling_primary = upwind_tracer_coupling.upwind_primary
         upwind_tracer_coupling_secondary = upwind_tracer_coupling.upwind_secondary
                 
@@ -485,7 +484,7 @@ def gather(gb,
             ) 
         
         # Finally we have the transport over the interface equation
-        abs_lam = repeat(lam, 1, gb, dof_manager)
+        abs_lam = repeat(lam, 1, dof_manager)
         tracer_over_interface_wrapper = (
              upwind_tracer_coupling.mortar_discr * eta_tracer 
                - (high_to_low_tracer + low_to_high_tracer) * abs_lam
@@ -588,7 +587,7 @@ def gather(gb,
     # full_flux = mpfa * p + bound mpfa * p_bound + ...
     # Need to expand the flux vector
     
-    expanded_flux = repeat(full_flux, num_aq_components, gb, dof_manager)
+    expanded_flux = repeat(full_flux, num_aq_components, dof_manager)
    
     transport = (
         (mass.mass * T - mass_prev.mass * T_prev) / dt
@@ -650,7 +649,7 @@ def gather(gb,
         upwind_coupling_primary = upwind_coupling.upwind_primary
         upwind_coupling_secondary = upwind_coupling.upwind_secondary
         
-        expanded_lam = repeat(lam, num_aq_components, gb, dof_manager)
+        expanded_lam = repeat(lam, num_aq_components, dof_manager)
         
         # First project the concentration from high to low
         # At the higher-dimensions, we have both fixed 
@@ -707,13 +706,13 @@ def gather(gb,
         return Fa, Fi
     
     def phi_min(mineral_conc, log_primary):
-      """
-      Evaluation of the min function 
-      """
-      sec_conc = 1 - cell_equil_prec * pp.ad.exp(cell_E * log_primary)
-      Fa, Fi = F_matrix(mineral_conc.val, sec_conc.val)
-      eq = Fa * sec_conc + Fi * mineral_conc
-      return eq
+        """
+        Evaluation of the min function 
+        """
+        sec_conc = 1 - cell_equil_prec * pp.ad.exp(cell_E * log_primary)
+        Fa, Fi = F_matrix(mineral_conc.val, sec_conc.val)
+        eq = Fa * sec_conc + Fi * mineral_conc
+        return eq
     
     ad_min_1 = pp.ad.Function(phi_min, "")
     mineral_eq = ad_min_1(precipitate, log_X)
