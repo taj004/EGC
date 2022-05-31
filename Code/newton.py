@@ -25,7 +25,7 @@ def update_darcy(gb, dof_manager):
     full_flux = data[pp.PARAMETERS]["previous_newton_iteration"]["AD_full_flux"]
     
     # Convert to numerical values
-    num_flux = full_flux.evaluate(dof_manager)
+    num_flux = pp.ad.Expression(full_flux, dof_manager).to_ad(gb)
     if hasattr(num_flux, "val"):
         num_flux = num_flux.val
     # end if
@@ -53,10 +53,7 @@ def update_darcy(gb, dof_manager):
         
         # The flux
         edge_flux = data[pp.PARAMETERS]["previous_newton_iteration"]["AD_lam_flux"]
-        num_edge_flux = edge_flux.evaluate(dof_manager)
-        if hasattr(num_edge_flux, "val"):
-            num_edge_flux = num_edge_flux.val
-        # end if
+        num_edge_flux = pp.ad.Expression(edge_flux, dof_manager).to_ad(gb).val
         sign_edge_flux = np.sign(num_edge_flux) 
         
         val = 0
@@ -203,7 +200,7 @@ def newton_gb(gb: pp.GridBucket,
     i, int, the number of iterations used
     """
   
-    J, resid = equation.assemble()
+    J, resid = equation.assemble_matrix_rhs()
     norm_orig = np.linalg.norm(resid)
     print(norm_orig)
     
@@ -268,7 +265,7 @@ def newton_gb(gb: pp.GridBucket,
                                     equation_manager=equation,
                                     iterate=True
                                     ) 
-        J, resid = equation.assemble()
+        J, resid = equation.assemble_matrix_rhs()
       
         # Measure the error    
         norm_now = np.linalg.norm(resid)
