@@ -234,8 +234,8 @@ def update_aperture(gb):
             mass_CaSO4 = mol_CaSO4 * 136.15 * 0.001
         
             # Mineral densitys    
-            density_CaCO3 = 2.71e3  # g/m^3
-            density_CaSO4 = 2.97e3 # g/m^3
+            density_CaCO3 = 2.71e3 # kg/m^3
+            density_CaSO4 = 2.97e3 # kg/m^3
                                                 
             # the mineral volumes                                            
             mineral_vol_CaCO3 = mass_CaCO3 / density_CaCO3 
@@ -308,7 +308,7 @@ def update_concentrations(gb, dof_manager, to_iterate=False):
                 # thus we also need the "current" dimension of the grid.
                 # Lastly, we look at the grids inividually
                 
-                if key[1]=="log_X" and g.dim==key[0].dim and g.num_cells==key[0].num_cells:
+                if not to_iterate and key[1]=="log_X" and g.dim==key[0].dim and g.num_cells==key[0].num_cells:
                         inds = slice(dof_ind[val], dof_ind[val+1]) 
                         primary = x[inds]
                 # Get the mineral concentrations, in a similar manner
@@ -324,8 +324,7 @@ def update_concentrations(gb, dof_manager, to_iterate=False):
           # end key,val-loop
           
         S = data_chemistry["stoic_coeff_S"]   
-        S_on_grid = sps.block_diag([S for i in range(g.num_cells)]).tocsr()
-        
+       
         eq_inds=slice(val, val+ g.num_cells)
         eq_const_on_grid = sps.dia_matrix(
                 (np.hstack([eq.diagonal()[eq_inds] for i in range(g.num_cells)]), 0),
@@ -336,7 +335,11 @@ def update_concentrations(gb, dof_manager, to_iterate=False):
                 ).tocsr() 
         
         val += g.num_cells
-        secondary_species = eq_const_on_grid * np.exp(S_on_grid * primary) 
+        
+        if not to_iterate:
+            S_on_grid = sps.block_diag([S for i in range(g.num_cells)]).tocsr()
+            secondary_species = eq_const_on_grid * np.exp(S_on_grid * primary) 
+        # end if
         
         caco3 = mineral[0::2]
         caso4 = mineral[1::2]
@@ -346,26 +349,7 @@ def update_concentrations(gb, dof_manager, to_iterate=False):
                 "CaCO3": caco3,
                 "CaSO4": caso4
                 })
-            
-            d[pp.PARAMETERS]["iterating_param"].update({ 
-            # Primary
-            "Ca2+": np.exp(primary[0::4]),
-            "CO3":  np.exp(primary[1::4]),
-            "SO4":  np.exp(primary[2::4]),
-            "H+":   np.exp(primary[3::4]),
-            
-            # Secondary
-            "HCO3": secondary_species[0::3],
-            "HSO4": secondary_species[1::3],
-            "OH-" : secondary_species[2::3],   
-            
-            # Minerals
-            "CaCO3": caco3,
-            "CaSO4": caso4
-            })
-              
         else:
-  
             d[pp.STATE].update({
             "CaCO3": caco3,
             "CaSO4": caso4,
