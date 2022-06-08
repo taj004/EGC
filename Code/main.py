@@ -6,6 +6,7 @@ Main script
 # %% Import the neseccary packages
 import numpy as np
 import scipy.sparse as sps
+import matplotlib.pyplot as plt
 import porepy as pp
 
 import equations
@@ -19,12 +20,15 @@ from pathlib import Path
 def create_mesh(mesh_args):
     """
     Create the computational domain EGC.
-    The (physical) domain 2x1
+    The (physical) domain 2x0.5
     
     Input:
         mesh_args: dict parameters for discretization
+        scale: int, scaling parameters for the domain size. It is assumed that
+        mesh_args and scale are compatible, i.e. mismatches are the users fault
+    
     Return:
-        gb: a grid bucket
+        a grid bucket
     """
     pts = np.array([[0.6, 0.2], # End pts 
                     [0.2, 0.8], # Statring pts
@@ -230,9 +234,9 @@ for g, d in gb:
     mol_CaCO3 = precipitated_init[0] * g.cell_volumes 
     mol_CaSO4 = precipitated_init[1] * g.cell_volumes
 
-    # Next convert mol to g
-    mass_CaCO3 = mol_CaCO3 * 100.09 * 0.001 # the "100.09" is molar mass, g/mol
-    mass_CaSO4 = mol_CaSO4 * 136.15 * 0.001 # "0.001" convert g to kg
+    # Next convert mol to kg
+    mass_CaCO3 = mol_CaCO3 * 100.09 * 0.001 
+    mass_CaSO4 = mol_CaSO4 * 136.15 * 0.001 
 
     # Densitys from
     # https://doi.org/10.1016/B978-0-08-100404-3.00004-4
@@ -263,7 +267,7 @@ for g, d in gb:
         ) 
     
     if g.dim == gb.dim_max():
-        porosity -= 0.8
+        porosity -= 0.8 # Non-reactive fraction
         K = matrix_permeability * unity
     else:
         K = np.power(aperture, 2) / 12
@@ -615,10 +619,10 @@ edge_list = [e for e,_ in gb.edges()]
 data_2d[pp.PARAMETERS]["grid_params"].update({
     "grid_list": grid_list,
     "edge_list": edge_list,
-    "mortar_projection_single": pp.ad.MortarProjections(gb, edges=edge_list, grids=grid_list, nd=1),
-    "mortar_projection_several": pp.ad.MortarProjections(gb, edges=edge_list, grids=grid_list, nd=num_components),
-    "trace_single": pp.ad.Trace(grid_list, nd=1),
-    "trace_several": pp.ad.Trace(grid_list, nd=num_components),
+    "mortar_projection_single": pp.ad.MortarProjections(gb, nd=1),
+    "mortar_projection_several": pp.ad.MortarProjections(gb, nd=num_components),
+    "trace_single": pp.ad.Trace(gb, grid_list, nd=1),
+    "trace_several": pp.ad.Trace(gb, grid_list, nd=num_components),
     "divergence_single": pp.ad.Divergence(grid_list, dim=1),
     "divergence_several": pp.ad.Divergence(grid_list, dim=num_aq_components)
     })
@@ -631,7 +635,7 @@ equation_manager = equations.gather(gb,
                                     equation_manager=equation_manager)
 
 #%% Prepere for exporting
-#to_paraview = pp.Exporter(gb, file_name="vars_to_egc", folder_name="to_study")
+to_paraview = pp.Exporter(gb, file_name="vars_to_egc", folder_name="to_study")
 time_store = np.array([1., 2., 3., 4., 5., 6., 7.]) * pp.DAY
 j=0
 fields = ["pressure",
@@ -645,7 +649,7 @@ current_time = data_2d[pp.PARAMETERS]["transport"]["current_time"]
 final_time = data_2d[pp.PARAMETERS]["transport"]["final_time"]
 
 #%% Time loop
-while current_time < 1000:
+while current_time < final_time:
 
     print(f"Current time {current_time}")
 
@@ -662,7 +666,7 @@ while current_time < 1000:
     
     if j < len(time_store) and np.abs(current_time - time_store[j]) < 10:
         j+=1
-        #to_paraview.write_vtu(fields, time_step = current_time)
+        to_paraview.write_vtu(fields, time_step = current_time)
     # end if
 # end time-loop
 
