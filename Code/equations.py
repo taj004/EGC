@@ -1,13 +1,10 @@
-"""
-@author: uw
-"""
 
 import numpy as np
 import porepy as pp
 import scipy.sparse as sps
 
 
-def repeat(v, reps, gb, dof_manager):
+def repeat(v, reps, dof_manager
     """
     Repeat a vector v, reps times
     Main target is the flux vectors, in the transport processes  
@@ -30,12 +27,8 @@ def repeat(v, reps, gb, dof_manager):
     num_v_reps = np.repeat(num_v, reps)
     
     # Wrap the array in Ad.
-    # Note that we return absolute value of the expanded vectors
-    # The reason is these vectors are ment to use as scale values 
-    # in the solute transport equation. 
-    # The signs are handled in the darcy_flux  
-    ad_reps = pp.ad.Array(np.abs(num_v_reps))
-
+    ad_reps = pp.ad.Array(num_v_reps)
+    
     return  ad_reps
 
 def remove_frac_face_flux(full_flux, gb, dof_manager):
@@ -89,6 +82,28 @@ def rho(p):
     # end if-else
     return density
 
+def split_bc(bc,dof_manager,keyword="flow"):
+    """Split boundary condition into Dirichlet and Neumann"""
+    # Grid information
+    gb = dof_manager.gb
+    g = gb.grids_of_dimension(gb.dim_max())[0]
+    d = gb.node_props(g)[pp.PARAMETERS][keyword]["bc"]
+    
+    # Boundary values
+    bc_val = bc.evaluate(dof_manager)
+    
+    # The Neumann and Dirichlet indices
+    neu_ind = np.where(d.is_neu)
+    dir_ind = np.where(d.is_dir)
+    
+    neu_bc = np.zeros(dof_manager.gb.num_faces())
+    dir_bc  = neu_bc.copy()
+    
+    neu_bc[neu_ind] = bc_val[neu_ind]
+    dir_bc[dir_ind] = bc_val[dir_ind]
+    
+    return pp.ad.Array(dir_bc), pp.ad.Array(neu_bc)
+    
 #%% Assemble the non-linear equations
     
 def gather(gb, 
@@ -211,10 +226,12 @@ def gather(gb,
     equil_ad = pp.ad.Function(equilibrium_all_cells, "equil")
     
     # Finally, make it into an Expression which can be evaluated.
-    equilibrium_eq = pp.ad.Expression(equil_ad(T, log_X, precipitate),
-                                      dof_manager, 
-                                      "equilibrium"
-                                      ) 
+
+    equilibrium_eq = equil_ad(T, 
+                              log_X,
+                              precipitate)
+    equilibrium_eq.set_name("equilibrium")
+
     
     #%% The flow equation 
    
@@ -272,8 +289,10 @@ def gather(gb,
     
     rho_on_face = (
         upwind_weight.upwind * rho_ad_main
-        + upwind_weight.rhs * rho_ad_bc
-        + upwind_weight.outflow_neumann * rho_ad_main
+
+        + upwind_weight.bound_transport_dir * rho_ad_bc 
+        + upwind_weight.bound_transport_neu * rho_ad_bc 
+
         ) 
 
     # Ad wrapper of Mpfa discretization
@@ -347,12 +366,10 @@ def gather(gb,
         ) 
     if len(edge_list)>0:
                        
-        pressure_trace_from_high = (
-            mortar_projection.primary_to_mortar_avg * mpfa.bound_pressure_cell * p
-            + (
-                mortar_projection.primary_to_mortar_avg * mpfa.bound_pressure_face *
-                mortar_projection.mortar_to_primary_int * lam
-                )
+        pressure_trace_from_high = mortar_projection.primary_to_mortar_avg * (
+             mpfa.bound_pressure_cell * p + 
+             mpfa.bound_pressure_face * mortar_projection.mortar_to_primary_int * lam +
+             mpfa.bound_pressure_face * bound_flux
             )
         
         pressure_from_low = mortar_projection.secondary_to_mortar_avg * p   
@@ -396,9 +413,9 @@ def gather(gb,
        
     # It is similar to the solute transport equation, which is studied 
     # in detail below, but only applied to one component.
-    # The reason I placed the construction of the temperature equation 
+    # The reason I placed the construction of the tracer 
     # above the solute transport equation is to avoid having to "redefine"
-    # the div, the mortar_projection, etc operators
+    # the div, mortar_projection, etc operators
   
     # Upwind discretization for advection.
     upwind_tracer = pp.ad.UpwindAd(keyword=tracer, grids=grid_list)
@@ -408,27 +425,23 @@ def gather(gb,
     
     # Ad wrapper of boundary conditions
     bc_tracer = pp.ad.BoundaryCondition(keyword=tracer, grids=grid_list)
-       
-    # For the accumulation term, we need T and teh porosity at  
-    # the previous time step. These should be fixed in the Newton-iterations
+    mass_tracer = pp.ad.MassMatrixAd(tracer, grid_list)
     if iterate: # Newton-iteration 
-        mass_tracer = pp.ad.MassMatrixAd(tracer, grid_list)
         mass_tracer_prev = data_prev_time["mass_tracer_prev"]
         tracer_prev = data_prev_time["tracer_prev"]
     else: # We are interested in "constructing" the equations
 
         # Mass matrix for accumulation
-        mass_tracer = pp.ad.MassMatrixAd(tracer, grid_list)
         mass_tracer_prev = pp.ad.MassMatrixAd(tracer, grid_list) 
        
-        # The solute solution at time step n, i.e. 
-        # the one we need to use to fine the solution at time step n+1
         tracer_prev = passive_tracer.previous_timestep() 
         
         # Store for Newton iterations
         data_prev_time["tracer_prev"] = tracer_prev
         data_prev_time["mass_tracer_prev"] = mass_tracer_prev    
     # end if-else
+
+
     
     # We need four terms for the solute transport equation:
     # 1) Accumulation
@@ -437,31 +450,38 @@ def gather(gb,
     # 4) boundary condition for outlet.
     abs_full_flux = repeat(full_flux, 1, gb, dof_manager)
 
+
+    tracer_adv = (
+               full_flux * (upwind_tracer.upwind * passive_tracer)
+                - upwind_tracer.bound_transport_dir * full_flux * bc_tracer
+                - upwind_tracer.bound_transport_neu * bc_tracer
+            ) 
+    
+    if len(edge_list) > 0:
+        tracer_adv -= (
+            upwind_tracer.bound_transport_neu * 
+            mortar_projection.mortar_to_primary_int * 
+            eta_tracer
+            ) 
+    # end if
+    
     tracer_wrapper = (
-        (mass_tracer.mass * passive_tracer - mass_tracer_prev.mass * tracer_prev) / dt
-        
-        # advection    
-        + div * (
-            (upwind_tracer.upwind * passive_tracer) * abs_full_flux
-                )
-        
-        - div * (
-            (upwind_tracer.rhs * bc_tracer) * abs_full_flux
-            )
-        
-        - div * (
-            (upwind_tracer.outflow_neumann * passive_tracer) * abs_full_flux
-            )
-    )
+        (mass_tracer.mass * passive_tracer - 
+         mass_tracer_prev.mass * tracer_prev) / dt
+
+        # Advection    
+        + div * tracer_adv
+        )
+
     
     # Add the projections 
     if len(edge_list) > 0:
         
-        tracer_wrapper += (
-            trace.inv_trace * 
-            mortar_projection.mortar_to_primary_int *
-            eta_tracer                                    
-            )
+        # tracer_wrapper += (
+        #     trace.inv_trace *
+        #     mortar_projection.mortar_to_primary_int *
+        #     eta_tracer
+        #     )
         
         tracer_wrapper -= (
             mortar_projection.mortar_to_secondary_int *
@@ -481,25 +501,28 @@ def gather(gb,
         trace_of_tracer = trace.trace * passive_tracer
                                                     
         high_to_low_tracer = (
+
             upwind_tracer_coupling_flux *
             upwind_tracer_coupling_primary * 
             mortar_projection.primary_to_mortar_avg *  
             trace_of_tracer
-            ) 
+            ) * lam
         
         # Next project concentration from lower onto higher dimension
         low_to_high_tracer = (
+
             upwind_tracer_coupling_flux * 
             upwind_tracer_coupling_secondary * 
             mortar_projection.secondary_to_mortar_avg * 
             passive_tracer
-            ) 
+            ) * lam
         
         # Finally we have the transport over the interface equation
+        #abs_lam = repeat(lam, 1, dof_manager)
         abs_lam = repeat(lam, 1, gb, dof_manager)
         tracer_over_interface_wrapper = (
-             upwind_tracer_coupling.mortar_discr * eta_tracer 
-               - (high_to_low_tracer + low_to_high_tracer) * abs_lam
+            eta_tracer - 
+            (high_to_low_tracer + low_to_high_tracer) 
             )  
     # end if
     
@@ -517,37 +540,9 @@ def gather(gb,
         
 #%% Next, the (solute) transport equations.
 
-    # This consists of terms for accumulation and advection, in addition to boundary conditions.
-    # There are two additional complications:
-    # 1) We need mappings between the full set of primary species and the advective subset.
-    # 2) The primary variable for concentrations is on log-form, while the standard term is
-    #    advected.
-    # None of these are difficult to handle, it just requires a bit of work.
-    
-    # The advection problem is set for the aquatic components only.
-    # Create mapping between aquatic and all components
-    aq_components = data_transport["aqueous_components"]
-    cols = np.ravel(
-        aq_components.reshape((-1, 1)) + (num_components * np.arange(gb.num_cells() )), order="F"
-    )
-    sz = num_aq_components * gb.num_cells()
-    rows = np.arange(sz)
-    matrix_vals = np.ones(sz)
-    
-    # Mapping from all to aquatic components. The reverse map is achieved by a transpose.
-    all_2_aquatic = pp.ad.Matrix(
-        sps.coo_matrix(
-            (matrix_vals, (rows, cols)),
-            shape=(num_aq_components * gb.num_cells(), num_components * gb.num_cells()),
-        ).tocsr()
-    )
-    
     # Upwind discretization for advection.
     upwind = pp.ad.UpwindAd(keyword = transport_kw, grids = grid_list)
-    if len(edge_list) > 0:
-        upwind_coupling = pp.ad.UpwindCouplingAd(keyword=transport_kw, edges = edge_list)
-    # end if
-    
+ 
     # Ad wrapper of boundary conditions
     bc_c = pp.ad.BoundaryCondition(keyword=transport_kw, grids=grid_list)
     
@@ -567,17 +562,17 @@ def gather(gb,
     
     # Wrap function in an Ad function, ready to be parsed
     log2lin = pp.ad.Function(log_to_linear, "")
-       
-    # For the accumulation term, we need T and teh porosity at  
+    log_c = log2lin(log_X)
+    
+    # For the accumulation term, we need T and the porosity at  
     # the previous time step. These should be fixed in the Newton-iterations
-    if iterate: # Newton-iteration 
-        mass = pp.ad.MassMatrixAd(mass_kw, grid_list)
+    mass = pp.ad.MassMatrixAd(mass_kw, grid_list)
+    if iterate: # Newton-iteration     
         mass_prev = data_prev_time["mass_prev"]
         T_prev = data_prev_time["T_prev"]
     else: # We are interested in "constructing" the equations
 
         # Mass matrix for accumulation
-        mass = pp.ad.MassMatrixAd(mass_kw, grid_list)
         mass_prev = pp.ad.MassMatrixAd(mass_kw, grid_list) 
        
         # The solute solution at time step n, 
@@ -600,24 +595,29 @@ def gather(gb,
     # The fluxes are computed above, in the flow part as
     # full_flux = mpfa * p + bound mpfa * p_bound + ...
     # Need to expand the flux vector
+    expanded_flux = repeat(full_flux, num_aq_components, dof_manager)
     
-    expanded_flux = repeat(full_flux, num_aq_components, gb, dof_manager)
-   
+    # Advection 
+    advection = (
+           expanded_flux * (upwind.upwind * log_c) 
+            - upwind.bound_transport_dir * expanded_flux * bc_c 
+            - upwind.bound_transport_neu * bc_c
+            )  
+    
+    if len(edge_list) > 0:
+        
+        advection -= (
+            upwind.bound_transport_neu * 
+            mortar_projection.mortar_to_primary_int * 
+        
+            eta
+            ) 
+    # end if
+    
     transport = (
         (mass.mass * T - mass_prev.mass * T_prev) / dt
-        
-        # advection    
-        + all_2_aquatic.transpose() * div * (
-            (upwind.upwind * all_2_aquatic * log2lin(log_X)) * expanded_flux 
-                )
-        
-        - all_2_aquatic.transpose() * div * (
-            (upwind.rhs * bc_c) * expanded_flux
-            )
-        
-        - all_2_aquatic.transpose() * div * (
-            (upwind.outflow_neumann * all_2_aquatic * T) * expanded_flux
-            )
+        +  div * advection  
+   
     ) 
     
     # Add the projections 
@@ -626,46 +626,23 @@ def gather(gb,
         # The trace operator
         trace = data_grid["trace_several"]
         
-        # Like above, we need mapping between aquatic and all components,
-        # but now with mortar cells
-        cols2 = np.ravel(
-            aq_components.reshape((-1, 1)) 
-            + (num_components * np.arange(gb.num_mortar_cells() )), order="F"
-        )
-        
-        sz2 = num_aq_components * gb.num_mortar_cells()
-        rows2 = np.arange(sz2)
-        matrix_vals2 = np.ones(sz2)
-        
-        # Mapping from all to aquatic components. 
-        # The reverse map is achieved by a transpose.
-        all_2_aquatic_at_interface = pp.ad.Matrix(
-            sps.coo_matrix(
-                (matrix_vals2, (rows2, cols2)),
-                shape=(num_aq_components * gb.num_mortar_cells(), 
-                       num_components    * gb.num_mortar_cells() ),
-            ).tocsr()
-            )
-        
-        transport += (
-            trace.inv_trace * 
-            mortar_projection.mortar_to_primary_int *
-            all_2_aquatic_at_interface.transpose() * # Behaves like a "coupling factor" to ensure that
-            eta                                      # the multiplication is ok  
-            )
+        # transport += (
+        #     trace.inv_trace * 
+        #     mortar_projection.mortar_to_primary_int *
+        #     #all_2_aquatic_at_interface.transpose() * 
+        #     eta                                       
+        #     )
         
         transport -= (
             mortar_projection.mortar_to_secondary_int *
-            all_2_aquatic_at_interface.transpose() *
             eta 
             )  
     # end if
     
     #%% Transport over the interface
     if len(edge_list) > 0:
-        
+        upwind_coupling = pp.ad.UpwindCouplingAd(keyword=transport_kw, edges = edge_list)
         # Some tools we need
-        upwind_coupling_flux = upwind_coupling.flux
         upwind_coupling_primary = upwind_coupling.upwind_primary
         upwind_coupling_secondary = upwind_coupling.upwind_secondary
         
@@ -675,12 +652,10 @@ def gather(gb,
         # At the higher-dimensions, we have both fixed 
         # and aqueous concentration. Only the aqueous 
         # concentrations are transported
-        trace_of_conc = trace.trace * log2lin(log_X) 
+        trace_of_conc = trace.trace * log_c 
                                                     
         high_to_low_trans = (
-            upwind_coupling_flux *
             upwind_coupling_primary * 
-            all_2_aquatic_at_interface * 
             mortar_projection.primary_to_mortar_avg *  
             trace_of_conc
             ) 
@@ -689,17 +664,15 @@ def gather(gb,
         # At the lower-dimension, we also have both 
         # fixed and aqueous concentration
         low_to_high_trans = (
-            upwind_coupling_flux * 
             upwind_coupling_secondary * 
-            all_2_aquatic_at_interface * 
             mortar_projection.secondary_to_mortar_avg * 
-            log2lin(log_X) 
+            log_c
             ) 
         
         # Finally we have the transport over the interface equation
         transport_over_interface = (
-             upwind_coupling.mortar_discr * eta 
-            - (high_to_low_trans + low_to_high_trans) * expanded_lam 
+            eta - 
+            (high_to_low_trans + low_to_high_trans ) * expanded_lam
             )  
     # end if
     

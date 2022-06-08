@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Solve a system of non-linear equations on a GB,
 using Newton's method and the AD-framework in PorePy
@@ -53,8 +51,13 @@ def update_darcy(gb, dof_manager):
         
         # The flux
         edge_flux = data[pp.PARAMETERS]["previous_newton_iteration"]["AD_lam_flux"]
-        num_edge_flux = pp.ad.Expression(edge_flux, dof_manager).to_ad(gb).val
-        sign_edge_flux = np.sign(num_edge_flux) 
+
+        num_edge_flux = edge_flux.evaluate(dof_manager)
+        if hasattr(num_edge_flux, "val"):
+            num_edge_flux = num_edge_flux.val
+        # end if
+        sign_edge_flux = np.sign(num_edge_flux)
+
         
         val = 0
         for e,d in gb.edges():
@@ -168,7 +171,6 @@ def backtrack(equation, dof_manager,
         # Check if norm(alpha*p_k) is small. Stop if yes.
         # In such a case we might expect convergence
         if np.linalg.norm(alpha*p_k) < min_tol:
-            dof_manager.distribute_variable(x_k+alpha*p_k, to_iterate=True)
             break
         # end if
         
@@ -191,7 +193,7 @@ def newton_gb(gb: pp.GridBucket,
     target_name, string. Value used to target a keyword and clip the associated numerical values 
     clip_low_and_up, numpy array. the upper and lower bound for clipping. 
           The form is np.array([low, up]). The values are interpreted as log values, 
-          e.g. np.array([-30,25]), where -30 and 25 is interpreted as
+          e.g. for np.array([-30,25]), -30 and 25 are interpreted as
               -30=log(x1), 25=log(x2)     
     
     Returns
@@ -271,8 +273,8 @@ def newton_gb(gb: pp.GridBucket,
         norm_now = np.linalg.norm(resid)
         err_dist = np.linalg.norm(dx, np.inf) 
         # Stop if converged. 
-        if norm_now < 1e-7 * norm_orig or norm_now < 1e-6 or \
-            err_dist < 1e-8 * np.linalg.norm(x_new, np.inf):
+        if norm_now < 1e-6 * norm_orig or norm_now < 1e-6 or \
+            err_dist < 1e-7 * np.linalg.norm(x_new, np.inf):
             print("Solution reached")
             conv = True
         # end if
