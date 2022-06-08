@@ -44,7 +44,7 @@ def remove_frac_face_flux(full_flux, gb, dof_manager):
         fracture_faces = g.tags["fracture_faces"]
         
         # Remove the contribution on the faces directly
-        is_fracture_faces = np.where(fracture_faces == True)[0]
+        is_fracture_faces = np.where(fracture_faces==True)[0]
         
         # To remove the flux at fracture fraces in the lower dimensions,
         # we need to correct the fracture face indexing
@@ -314,7 +314,6 @@ def gather(gb,
         upwind_coupling_weight = pp.ad.UpwindCouplingAd(keyword=flow_kw, edges=edge_list)
         trace = data_grid["trace_single"]
               
-        #up_weight_flux = upwind_coupling_weight.flux
         up_weight_primary = upwind_coupling_weight.upwind_primary
         up_weight_secondary = upwind_coupling_weight.upwind_secondary
         
@@ -362,8 +361,9 @@ def gather(gb,
                        
         pressure_trace_from_high = mortar_projection.primary_to_mortar_avg * (
              mpfa.bound_pressure_cell * p + 
-             mpfa.bound_pressure_face * mortar_projection.mortar_to_primary_int * lam +
-             mpfa.bound_pressure_face * bound_flux
+             mpfa.bound_pressure_face * (
+                 mortar_projection.mortar_to_primary_int * lam + bound_flux
+                 )
             )
         
         pressure_from_low = mortar_projection.secondary_to_mortar_avg * p   
@@ -418,15 +418,14 @@ def gather(gb,
     
     # Ad wrapper of boundary conditions
     bc_tracer = pp.ad.BoundaryCondition(keyword=tracer, grids=grid_list)
+    # Mass matrix for accumulation
     mass_tracer = pp.ad.MassMatrixAd(tracer, grid_list)
     if iterate: # Newton-iteration 
         mass_tracer_prev = data_prev_time["mass_tracer_prev"]
         tracer_prev = data_prev_time["tracer_prev"]
     else: # We are interested in "constructing" the equations
-
-        # Mass matrix for accumulation
-        mass_tracer_prev = pp.ad.MassMatrixAd(tracer, grid_list) 
-       
+    
+        mass_tracer_prev = pp.ad.MassMatrixAd(tracer, grid_list)        
         tracer_prev = passive_tracer.previous_timestep() 
         
         # Store for Newton iterations
@@ -485,20 +484,20 @@ def gather(gb,
             upwind_tracer_coupling_primary * 
             mortar_projection.primary_to_mortar_avg *  
             trace_of_tracer
-            ) * lam
+            ) 
         
         # Next project concentration from lower onto higher dimension
         low_to_high_tracer = (
             upwind_tracer_coupling_secondary * 
             mortar_projection.secondary_to_mortar_avg * 
             passive_tracer
-            ) * lam
+            )
         
         # Finally we have the transport over the interface equation
         #abs_lam = repeat(lam, 1, dof_manager)
         tracer_over_interface_wrapper = (
             eta_tracer - 
-            (high_to_low_tracer + low_to_high_tracer) 
+            (high_to_low_tracer + low_to_high_tracer) * lam
             )  
     # end if
     
@@ -546,11 +545,11 @@ def gather(gb,
         T_prev = data_prev_time["T_prev"]
     else: # We are interested in "constructing" the equations
 
-        # Mass matrix for accumulation
+        # Fixed mass matrix
         mass_prev = pp.ad.MassMatrixAd(mass_kw, grid_list) 
        
         # The solute solution at time step n, 
-        # ie. the one we need to use to fine the solution at time step n+1
+        # ie. the one we need to use to find the solution at time step n+1
         T_prev = T.previous_timestep() 
         
         # Store for Newton iterations
@@ -579,11 +578,9 @@ def gather(gb,
             )  
     
     if len(edge_list) > 0:
-        
         advection -= (
             upwind.bound_transport_neu * 
             mortar_projection.mortar_to_primary_int * 
-        
             eta
             ) 
     # end if
@@ -614,7 +611,7 @@ def gather(gb,
     
     #%% Transport over the interface
     if len(edge_list) > 0:
-        upwind_coupling = pp.ad.UpwindCouplingAd(keyword=transport_kw, edges = edge_list)
+        upwind_coupling = pp.ad.UpwindCouplingAd(keyword=transport_kw, edges=edge_list)
         # Some tools we need
         upwind_coupling_primary = upwind_coupling.upwind_primary
         upwind_coupling_secondary = upwind_coupling.upwind_secondary
@@ -625,12 +622,10 @@ def gather(gb,
         # At the higher-dimensions, we have both fixed 
         # and aqueous concentration. Only the aqueous 
         # concentrations are transported
-        trace_of_conc = trace.trace * log_c 
-                                                    
         high_to_low_trans = (
             upwind_coupling_primary * 
             mortar_projection.primary_to_mortar_avg *  
-            trace_of_conc
+            trace.trace * log_c 
             ) 
         
         # Next project concentration from lower onto higher dimension

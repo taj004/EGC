@@ -35,23 +35,14 @@ def update_perm(gb):
             ref_phi = d_ref["porosity"]
             ref_perm = d_ref["permeability_aperture_scaled"]
             phi = d[pp.PARAMETERS]["mass"]["porosity"]
-            
+            # Matrix permeability
             K = matrix_perm(phi, ref_phi, ref_perm)
             
         else : # In the fracture and intersections
             ref_perm = d_ref["permeability_aperture_scaled"]
-            
             aperture = d[pp.PARAMETERS]["mass"]["aperture"]
-            length_scale = d_ref["length_scale"]
-            
-            # Aperture and permeability unscaled w.r.t. length scale 
-            aperture_unscaled = aperture * length_scale
-            K_unscaled = fracture_perm(aperture_unscaled) 
-            
-            d[pp.PARAMETERS]["flow"]["perm_unscaled"] = K_unscaled
-
-            K = K_unscaled / np.power(length_scale,2) 
-
+            # Fracture permeability 
+            K= fracture_perm(aperture) 
         # end if-else
         
         specific_volume = specific_vol(gb, g)
