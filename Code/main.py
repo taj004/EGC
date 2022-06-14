@@ -7,6 +7,7 @@ Main script
 import numpy as np
 import scipy.sparse as sps
 import porepy as pp
+import matplotlib.pyplot as plt
 
 import equations
 from solve_non_linear import solve_eqs
@@ -104,6 +105,11 @@ mesh_args = {"mesh_size_frac" : dx,
              "mesh_size_min"  : dz}
 gb = create_mesh(mesh_args)
 
+g = pp.CartGrid(nx=[10,10], physdims=[1,1])
+g.compute_geometry()
+gb = pp.GridBucket()
+gb.add_nodes(g)
+
 domain = {"xmin": 0, "xmax": gb.bounding_box()[1][0],
           "ymin": 0, "ymax": gb.bounding_box()[1][1]}
 
@@ -129,8 +135,8 @@ mortar_tracer = "mortar_tracer"
 # %% Loop over the gb, and set initial and default data
 
 # Permeabilities
-matrix_permeability = 1e-13
-#interfacial_permeability = 1e2
+matrix_permeability = 1e-11# 1e-13
+interfacial_permeability = 1e2
 
 # Initial uniform pressure
 init_pressure = 1000 # Pa
@@ -278,11 +284,11 @@ for g, d in gb:
         # The BC labels for the flow problem
         labels_for_flow = neu_faces.copy()
         labels_for_flow[outflow] = "dir"
-        labels_for_flow[inflow] = "dir"
+        #labels_for_flow[inflow] = "dir"
 
         # Set the BC values for flow
         bc_values_for_flow = np.zeros(g.num_faces)
-        bc_values_for_flow[bound_faces[inflow]] = 7 * init_pressure
+        bc_values_for_flow[bound_faces[inflow]] = -3.5e-5 * g.face_areas[bound_faces[inflow]]# 7 * init_pressure
         bc_values_for_flow[bound_faces[outflow]] = init_pressure
         bound_for_flow = pp.BoundaryCondition(g, 
                                               faces=bound_faces, 
@@ -582,14 +588,15 @@ for e, d in gb.edges():
     d[pp.DISCRETIZATION_MATRICES][tracer] = {}
     
     # FLow
-    #nd = interfacial_permeability * unity
+    nd = interfacial_permeability * unity
     d[pp.PARAMETERS][flow_kw] = {"darcy_flux": unity,
+                                 "normal_diffusivity":nd
                                   }
     d[pp.DISCRETIZATION_MATRICES][flow_kw] = {}
 # end e,d-loop
 
 # Finally, set the normal diffusivity for the flow problem
-update_interface(gb)
+
 #%% The data in various dimensions
 gb_2d = gb.grids_of_dimension(2)[0]
 data_2d = gb.node_props(gb_2d)
@@ -619,7 +626,7 @@ equation_manager = equations.gather(gb,
                                     equation_manager=equation_manager)
 
 #%% Prepere for exporting
-to_paraview = pp.Exporter(gb, file_name="vars_to_egc", folder_name="to_study")
+#to_paraview = pp.Exporter(gb, file_name="vars_to_egc", folder_name="to_study")
 time_store = np.array([1., 2., 3., 4., 5., 6., 7.]) * pp.DAY
 j=0
 fields = ["pressure",
@@ -633,7 +640,7 @@ current_time = data_2d[pp.PARAMETERS]["transport"]["current_time"]
 final_time = data_2d[pp.PARAMETERS]["transport"]["final_time"]
 
 #%% Time loop
-while current_time < 1000:
+while current_time < 500:
 
     print(f"Current time {current_time}")
 
@@ -650,7 +657,7 @@ while current_time < 1000:
     
     if j < len(time_store) and np.abs(current_time - time_store[j]) < 10:
         j+=1
-        to_paraview.write_vtu(fields, time_step = current_time)
+        #to_paraview.write_vtu(fields, time_step = current_time)
     # end if
 # end time-loop
 
@@ -679,17 +686,32 @@ time_steps = data_2d[pp.PARAMETERS]["previous_time_step"]["time_step"]
 
 newton_steps = np.asarray(newton_steps)
 time_steps = np.asarray(time_steps)
-time_points = np.linspace(0, final_time, newton_steps.size, endpoint=True)
+time_points = np.linspace(0, 500, newton_steps.size, endpoint=True)
 
-vals_to_store = np.column_stack(
-    (
-      time_points,
-      newton_steps,
-      time_steps,
-      )
-    )
+fig, (ax1,ax2) = plt.subplots(ncols=1, nrows=2, sharex=True, figsize=(15,12))
+ax1.plot(time_points, newton_steps, "ko-")
+ax1.tick_params(axis="y", labelsize=16,)
+ax1.set_title("Newton iterations")
 
-file_name = folder_name + "temporal_vals" 
-np.savetxt(file_name + ".csv", vals_to_store, 
-            delimiter=",", header="time_points, newton_steps, time_steps")
+ax2.semilogy(time_points, time_steps, "ko-")
+ax2.tick_params(axis="y", labelsize=16)
+ax2.set_title("Time steps")
+
+ticks_val = np.array([0, 1, 2, 3, 4, 5,])*1e2 
+plt.xticks(ticks=ticks_val, 
+            labels=ticks_val , fontsize=16)
+plt.show()
+
+
+# vals_to_store = np.column_stack(
+#     (
+#       time_points,
+#       newton_steps,
+#       time_steps,
+#       )
+#     )
+
+# file_name = folder_name + "temporal_vals" 
+# np.savetxt(file_name + ".csv", vals_to_store, 
+#             delimiter=",", header="time_points, newton_steps, time_steps")
 

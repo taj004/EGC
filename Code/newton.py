@@ -136,8 +136,8 @@ def backtrack(equation, dof_manager,
             mat = np.array([ [ 1/alpha**2, -1/alpha**2 ],
                              [-alpha_prev/alpha**2, alpha/alpha_prev**2 ] ] )
             
-            vec = np.array([ phi_old - f_k - dot*alpha,
-                             phi_new - f_k - dot*alpha_prev ] )
+            vec = np.array([ phi_new - f_k - dot*alpha,
+                             phi_old - f_k - dot*alpha_prev ] )
             
             numerator = alpha - alpha_prev 
         
@@ -252,7 +252,7 @@ def newton_gb(gb: pp.GridBucket,
         update_param.update_concentrations(gb, dof_manager, to_iterate=True)
         
         # Update the grid parameters
-        update_param.update(gb)
+        #update_param.update(gb)
         
         # --------------------- # 
         
@@ -271,8 +271,8 @@ def newton_gb(gb: pp.GridBucket,
         norm_now = np.linalg.norm(resid)
         err_dist = np.linalg.norm(dx, np.inf) 
         # Stop if converged. 
-        if norm_now < 1e-6 * norm_orig or norm_now < 1e-6 or \
-            err_dist < 1e-7 * np.linalg.norm(x_new, np.inf):
+        if norm_now < 1e-7 * norm_orig or norm_now < 1e-6 or \
+            err_dist < 1e-8 * np.linalg.norm(x_new, np.inf):
             print("Solution reached")
             conv = True
         # end if

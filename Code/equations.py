@@ -3,7 +3,7 @@ import numpy as np
 import porepy as pp
 import scipy.sparse as sps
 
-def repeat(v, reps, dof_manager):
+def repeat(v, reps, dof_manager, abs_val=False):
     """
     Repeat a vector v, reps times
     Main target is the flux vectors, in the transport processes  
@@ -26,8 +26,11 @@ def repeat(v, reps, dof_manager):
     num_v_reps = np.repeat(num_v, reps)
     
     # Wrap the array in Ad.
-    ad_reps = pp.ad.Array(num_v_reps)
-    
+    if abs_val is True:
+        ad_reps = pp.ad.Array(np.abs(num_v_reps))
+    else:
+        ad_reps = pp.ad.Array(num_v_reps)
+        
     return  ad_reps
 
 def remove_frac_face_flux(full_flux, gb, dof_manager):
@@ -432,20 +435,12 @@ def gather(gb,
         data_prev_time["tracer_prev"] = tracer_prev
         data_prev_time["mass_tracer_prev"] = mass_tracer_prev    
     # end if-else
-
-    tracer_adv = (
-               full_flux * (upwind_tracer.upwind * passive_tracer)
-                - upwind_tracer.bound_transport_dir * full_flux * bc_tracer
-                - upwind_tracer.bound_transport_neu * bc_tracer
-            ) 
     
-    if len(edge_list) > 0:
-        tracer_adv -= (
-            upwind_tracer.bound_transport_neu * 
-            mortar_projection.mortar_to_primary_int * 
-            eta_tracer
+    tracer_adv = (
+              (upwind_tracer.upwind * passive_tracer) * full_flux
+            - upwind_tracer.bound_transport_dir * full_flux * bc_tracer 
+            - upwind_tracer.bound_transport_neu *  bc_tracer 
             ) 
-    # end if
     
     tracer_wrapper = (
         (mass_tracer.mass * passive_tracer - 
@@ -457,7 +452,11 @@ def gather(gb,
     
     # Add the projections 
     if len(edge_list) > 0:
-        
+        tracer_wrapper -= div * (
+            upwind_tracer.bound_transport_neu * 
+            mortar_projection.mortar_to_primary_int * 
+            eta_tracer
+            ) 
         # tracer_wrapper += (
         #     trace.inv_trace *
         #     mortar_projection.mortar_to_primary_int *
@@ -563,36 +562,33 @@ def gather(gb,
     # 3) Boundary condition for inlet
     # 4) boundary condition for outlet.
     
-    # NOTE: The upwind discretization matrices are based on the 
-    # signs of the fluxes, not the fluxes themselfs.
-    # The fluxes are computed above, in the flow part as
+    # The upwind discretization matrices are calculated so that 
+    # they are essentially 1 at the flux indices.
+    # The fluxes computed above, in the flow part as
     # full_flux = mpfa * p + bound mpfa * p_bound + ...
-    # Need to expand the flux vector
+    # For complaints about this nonsensical way of scaling ohe advective
+    # flux, comtact Eirik Keilegavlen
+    
+    # Expand the flux vector and calculate the avective flux
     expanded_flux = repeat(full_flux, num_aq_components, dof_manager)
-    
-    # Advection 
     advection = (
-           expanded_flux * (upwind.upwind * log_c) 
-            - upwind.bound_transport_dir * expanded_flux * bc_c 
-            - upwind.bound_transport_neu * bc_c
+             (upwind.upwind * log_c) * expanded_flux
+            - upwind.bound_transport_dir * expanded_flux* bc_c 
+            - upwind.bound_transport_neu * bc_c 
             )  
-    
-    if len(edge_list) > 0:
-        advection -= (
-            upwind.bound_transport_neu * 
-            mortar_projection.mortar_to_primary_int * 
-            eta
-            ) 
-    # end if
     
     transport = (
         (mass.mass * T - mass_prev.mass * T_prev) / dt
-        +  div * advection  
+        +  div * advection
     ) 
     
     # Add the projections 
     if len(edge_list) > 0:
-        
+        transport -= div * (
+            upwind.bound_transport_neu * 
+            mortar_projection.mortar_to_primary_int * 
+            eta
+            ) 
         # The trace operator
         trace = data_grid["trace_several"]
         
