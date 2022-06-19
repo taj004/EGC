@@ -105,11 +105,6 @@ mesh_args = {"mesh_size_frac" : dx,
              "mesh_size_min"  : dz}
 gb = create_mesh(mesh_args)
 
-g = pp.CartGrid(nx=[10,10], physdims=[1,1])
-g.compute_geometry()
-gb = pp.GridBucket()
-gb.add_nodes(g)
-
 domain = {"xmin": 0, "xmax": gb.bounding_box()[1][0],
           "ymin": 0, "ymax": gb.bounding_box()[1][1]}
 
@@ -135,7 +130,7 @@ mortar_tracer = "mortar_tracer"
 # %% Loop over the gb, and set initial and default data
 
 # Permeabilities
-matrix_permeability = 1e-11# 1e-13
+matrix_permeability = 1e-13
 interfacial_permeability = 1e2
 
 # Initial uniform pressure
@@ -314,7 +309,7 @@ for g, d in gb:
         bc_oh = oh[0]
         bc_h = equil_consts[2] / bc_oh
         bc_hso4 = equil_consts[1] * bc_h * bc_so4
-        bc_hco3 = equil_consts[0] * bc_h * bc_so4
+        bc_hco3 = equil_consts[0] * bc_h * bc_co3
         
         bc_X = np.array([bc_ca, bc_co3, bc_so4, bc_h])
         bc_alpha = equil_consts[0:3] * np.exp(S*np.log(bc_X))
@@ -569,12 +564,12 @@ for e, d in gb.edges():
     d[pp.STATE].update({
         mortar_pressure: 0.0 * unity,
         mortar_transport: 0 * init_T_aq,
-        mortar_tracer: np.zeros(unity.size),
+        mortar_tracer: 0.0 * unity,
 
         pp.ITERATE: {
             mortar_pressure: 0.0 * unity,
             mortar_transport: 0*init_T_aq.copy(),
-            mortar_tracer: np.zeros(unity.size)
+            mortar_tracer:  0.0 *unity
         }
     })
 
