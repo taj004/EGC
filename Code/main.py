@@ -7,11 +7,10 @@ Main script
 import numpy as np
 import scipy.sparse as sps
 import porepy as pp
-import matplotlib.pyplot as plt
 
 import equations
 from solve_non_linear import solve_eqs
-from update_param import update_interface
+from update_param import equil_constants, update_elliptic_interface, update_intersection
 import pickle
 from pathlib import Path
 
@@ -44,10 +43,11 @@ def create_mesh(mesh_args):
     domain = {"xmin" :0.0, "xmax": 2.0, 
               "ymin" :0.0, "ymax": 1.0}
     network_2d = pp.FractureNetwork2d(pts, e, domain)
+    
     gb = network_2d.mesh(mesh_args)
     
     return gb
-
+    
 # %% Initialize variables related to the chemistry and the domain
 
 # Start with the chemical variables
@@ -63,8 +63,8 @@ def create_mesh(mesh_args):
 # eq = prod_i A_i ^xi_{ij} / A_j,
 # we thus need to take reciprocal.
 
-equil_consts = 1 / np.exp(np.array([10.339, 1.979, -13.997, -8.406, -4.362])) 
-equil_consts[3:5] = 1 / equil_consts[3:5]
+equil_consts_plummer = 1 / np.exp(np.array([10.339, 1.979, -13.997, -8.406, -4.362])) 
+equil_consts_plummer[3:5] = 1 / equil_consts_plummer[3:5]
 
 
 # Stochiometric matrix for the reactions between primary and secondary species.
@@ -98,7 +98,7 @@ num_components = num_aq_components + num_fixed_components
 num_secondary_components = S.shape[0]
 
 # Define fractures and a gb
-dx, dy, dz = 0.12, 0.12, 0.12 
+dx, dy, dz = 0.08, 0.08, 0.08
 
 mesh_args = {"mesh_size_frac" : dx,
              "mesh_size_bound": dy,
@@ -118,7 +118,7 @@ pressure = "pressure"
 tot_var = "T"
 log_var = "log_X"
 tracer = "passive_tracer"
-
+temperature = "temperature"
 minerals = "minerals"
 min_1 = "CaCO3"
 min_2 = "CaSO4"
@@ -126,18 +126,30 @@ min_2 = "CaSO4"
 mortar_pressure = "mortar_pressure"
 mortar_transport = "mortar_transport"
 mortar_tracer = "mortar_tracer"
+mortar_temperature_convection = "mortar_temperature_convection"
+mortar_temperature_conduction = "mortar_temperature_conduction"
 
 # %% Loop over the gb, and set initial and default data
 
-# Permeabilities
+# Matrix permeability
 matrix_permeability = 1e-13
-interfacial_permeability = 1e2
 
 # Initial uniform pressure
 init_pressure = 1000 # Pa
 
-# Some scaling values to help condition the problem
-length_scale = 1 
+# Initial temperature
+init_temp = 573.15 # K
+bc_temp = 543.15
+
+# Temperature params
+specific_heat_fluid = 4200.
+specific_heat_solid = 790.
+fluid_conduction = 0.6
+solid_conduction = 3.0 
+
+# Equilibirum constants
+init_equil_consts = equil_constants(gb, temp=init_temp) * equil_consts_plummer
+bc_equil_consts = equil_constants(gb, temp=bc_temp) * equil_consts_plummer
 
 for g, d in gb:
     #print(g.cell_volumes)
@@ -149,7 +161,8 @@ for g, d in gb:
                                tot_var:  {"cells": num_components},
                                log_var:  {"cells": num_components},
                                minerals: {"cells": 2},
-                               tracer:   {"cells": 1} 
+                               tracer:   {"cells": 1},
+                               temperature: {"cells": 1}
                                }
 
     # Initialize a state
@@ -164,26 +177,15 @@ for g, d in gb:
     if gb.dim_max() == g.dim:
         
         so4 = 10 * unity
-        ca = 0.9 / (equil_consts[4] * so4) * unity
-        co3 = 1 / (equil_consts[3] * ca) * unity
+        ca = 0.9 / (init_equil_consts[4] * so4) * unity
+        co3 = 1 / (init_equil_consts[3] * ca) * unity
         oh = 1.5e3 * unity
-        h = equil_consts[2] / oh * unity
-        hco3 = equil_consts[0] * h * co3 * unity
-        hso4 = equil_consts[1] * h * so4 * unity
-    
-        # Initally calcite is present, but not anhydrite 
-        # But no minerals at the boundary cells
-        # (The author experienced some issues at the boundary, e.g. extreme precipitation, 
-        # precipitation at outflow bc before the solutes are comming there etc)
-        cc = g.cell_centers[0]
-        ss = 2 * np.min(cc)
-        #left = cc < domain["xmin"] + ss
-        #right = cc > domain["xmax"] - ss
- 
+        h = init_equil_consts[2] / oh * unity
+        hco3 = init_equil_consts[0] * h * co3 * unity
+        hso4 = init_equil_consts[1] * h * so4 * unity
+
         precipitated_init = np.zeros((2,g.num_cells))
         precipitated_init[0] = 20
-        #precipitated_init[0][left] = 0
-        #precipitated_init[0][right] = 0
         
         init_X = np.array([ca, co3, so4, h])
         init_X_log = np.log(init_X)
@@ -242,12 +244,18 @@ for g, d in gb:
     mineral_width_CaSO4 = mineral_vol_CaSO4 / S_0
     
     open_aperture = 5e-3 
-    aperture = open_aperture - (
-        mineral_width_CaCO3 +  mineral_width_CaSO4 
-        ) 
+    if g.dim == gb.dim_max():
+        aperture = unity
+    elif g.dim == gb.dim_max()-1:
+        aperture = open_aperture - (
+            mineral_width_CaCO3 + mineral_width_CaSO4 
+            )
+    else :
+        #breakpoint()
+        aperture = update_intersection(gb)
+    # end if-else
     
     specific_volume = np.power(aperture, gb.dim_max()-g.dim)
-    
     dynamic_viscosity = 1e-3
     
     porosity = (
@@ -279,11 +287,11 @@ for g, d in gb:
         # The BC labels for the flow problem
         labels_for_flow = neu_faces.copy()
         labels_for_flow[outflow] = "dir"
-        #labels_for_flow[inflow] = "dir"
-
+        labels_for_flow[inflow] = "dir"
+        #-3.5e-5 * g.face_areas[bound_faces[inflow]]#
         # Set the BC values for flow
         bc_values_for_flow = np.zeros(g.num_faces)
-        bc_values_for_flow[bound_faces[inflow]] = -3.5e-5 * g.face_areas[bound_faces[inflow]]# 7 * init_pressure
+        bc_values_for_flow[bound_faces[inflow]] = 7 * init_pressure
         bc_values_for_flow[bound_faces[outflow]] = init_pressure
         bound_for_flow = pp.BoundaryCondition(g, 
                                               faces=bound_faces, 
@@ -300,27 +308,26 @@ for g, d in gb:
 
         # Set bc values. Note, at each face we have num_aq_components
         expanded_left = pp.fvutils.expand_indices_nd(bound_faces[inflow], num_aq_components)
-        Ny = bound_faces[inflow].size
         bc_values_for_transport = np.zeros(g.num_faces * num_aq_components)
           
         bc_so4 = so4[0]
-        bc_ca = 1 / (equil_consts[4] * bc_so4) # Precipitation of CaSO4
-        bc_co3 = 0.5 / (equil_consts[3] * bc_ca)# Dissolution of CaCO3
+        bc_ca = 1 / (bc_equil_consts[4] * bc_so4) # Precipitation of CaSO4
+        bc_co3 = 0.5 / (bc_equil_consts[3] * bc_ca)# Dissolution of CaCO3
         bc_oh = oh[0]
-        bc_h = equil_consts[2] / bc_oh
-        bc_hso4 = equil_consts[1] * bc_h * bc_so4
-        bc_hco3 = equil_consts[0] * bc_h * bc_co3
+        bc_h = bc_equil_consts[2] / bc_oh
+        bc_hso4 = bc_equil_consts[1] * bc_h * bc_so4
+        bc_hco3 = bc_equil_consts[0] * bc_h * bc_co3
         
         bc_X = np.array([bc_ca, bc_co3, bc_so4, bc_h])
-        bc_alpha = equil_consts[0:3] * np.exp(S*np.log(bc_X))
+        bc_alpha = bc_equil_consts[0:3] * np.exp(S*np.log(bc_X))
         bc_T = bc_X + S.T * bc_alpha 
         
-        bc_values_for_transport[expanded_left] = np.tile(bc_T, Ny)
+        bc_values_for_transport[expanded_left] = np.tile(bc_T, bound_faces[inflow].size)
         
         # On the right side, use initial values as boundary values
         bc_right_side = init_X[0:4,1] + S.T * alpha_init[0:3,1]
         expanded_right = pp.fvutils.expand_indices_nd(bound_faces[outflow], num_aq_components)
-        bc_values_for_transport[expanded_right] = np.tile(bc_right_side, Ny)
+        bc_values_for_transport[expanded_right] = np.tile(bc_right_side, bound_faces[outflow].size)
         
         # Boundary conditions for temperature
         labels_for_temp = neu_faces.copy()
@@ -328,6 +335,9 @@ for g, d in gb:
         bound_for_temp = pp.BoundaryCondition(g, 
                                               faces=bound_faces, 
                                               cond=labels_for_temp)
+        bc_values_for_temp = np.zeros(g.num_faces)
+        bc_values_for_temp[bound_faces[inflow]] = bc_temp
+        bc_values_for_temp[bound_faces[outflow]] = init_temp
         
         # Boundary conditions for the passive tracer
         labels_for_tracer = neu_faces.copy()
@@ -338,7 +348,7 @@ for g, d in gb:
         
         # The values
         bc_values_for_tracer = np.zeros(g.num_faces)
-        bc_values_for_tracer[bound_faces[inflow]] = 1
+        bc_values_for_tracer[bound_faces[inflow]] = 3
         
     else:
         # In the lower dimansions, no-flow (zero Neumann) conditions
@@ -356,11 +366,20 @@ for g, d in gb:
     # end if-else
 
     # Initial guess for Darcy flux
-    init_darcy_flux = np.zeros(g.num_faces)
-    init_darcy_flux[g.get_internal_faces()] = 1.0
+    init_darcy_flux = np.ones(g.num_faces)
+   # init_darcy_flux[g.get_internal_faces()] = 1.0
     
-    # Calulate the effective heat capacity
-    fluid_density = equations.rho(init_pressure)
+    # Calulate the heat capacity
+    fluid_density = equations.rho(init_pressure, init_temp)
+    solid_density = 0
+    if g.dim == gb.dim_max():
+        solid_density+= 2500
+    heat_capacity = (
+        porosity * fluid_density * specific_heat_fluid +
+        (1-porosity) * solid_density * specific_heat_solid
+        )
+    conduction = porosity * fluid_conduction + (1-porosity) * solid_conduction
+        
     # --------------------------------- #
 
     # Set the values in dictionaries
@@ -379,6 +398,7 @@ for g, d in gb:
         "bc_values": bc_values_for_flow,
         "bc": bound_for_flow,
         "permeability": K * specific_volume.copy() / dynamic_viscosity,
+        "second_order_tensor": pp.SecondOrderTensor(K * specific_volume.copy() / dynamic_viscosity),
         "darcy_flux": init_darcy_flux,
         "dynamic_viscosity": dynamic_viscosity
     }
@@ -389,6 +409,20 @@ for g, d in gb:
         "num_components": num_aq_components,
         "darcy_flux": init_darcy_flux
     }
+    
+    temp_data = {
+        "mass_weight": heat_capacity * specific_volume.copy(),
+        "darcy_flux": init_darcy_flux,
+        "second_order_tensor": pp.SecondOrderTensor(conduction * specific_volume.copy()),
+        "bc_values": bc_values_for_temp,
+        "bc": bound_for_temp,
+        "initial_temp": init_temp,
+        "fluid_conduction": fluid_conduction,
+        "solid_conduction": solid_conduction,
+        "specific_heat_fluid": specific_heat_fluid,
+        "specific_heat_solid": specific_heat_solid,
+        "solid_density": solid_density
+        }
     
     passive_tracer_data = {
         "bc_values": bc_values_for_tracer,
@@ -403,10 +437,10 @@ for g, d in gb:
         "permeability": K.copy(),
         "permeability_aperture_scaled": K.copy() * specific_volume.copy(),
         "aperture": aperture.copy(),
+        "specific_volume": specific_volume.copy(),
         "surface_area": S_0,
         "mass_weight": porosity.copy() * specific_volume.copy(),
-        "length_scale": length_scale,
-        "equil_consts": equil_consts
+        "equil_consts": equil_consts_plummer
     }
 
     # --------------------------------- #
@@ -419,33 +453,14 @@ for g, d in gb:
     d[pp.DISCRETIZATION_MATRICES][flow_kw] = {}
     d[pp.PARAMETERS][transport_kw] = transport_data
     d[pp.DISCRETIZATION_MATRICES][transport_kw] = {}
+    d[pp.PARAMETERS][temperature] = temp_data
+    d[pp.DISCRETIZATION_MATRICES][temperature] = {}
     d[pp.PARAMETERS][tracer] = passive_tracer_data
     d[pp.DISCRETIZATION_MATRICES][tracer] = {}
 
     # The reference values
     d[pp.PARAMETERS]["reference"] = reference_data
-
-    # The concentrations
-    d[pp.PARAMETERS]["concentration"] = {
-        # Primary components
-        "Ca2+": init_X[0] ,
-        "CO3": init_X[1] ,
-        "SO4": init_X[2] ,
-        "H+": init_X[3] ,
-        
-        # Secondary species
-        "HCO3": alpha_init[0] ,
-        "HSO4": alpha_init[1] ,
-        "OH-": alpha_init[2] ,
-        
-        # Minerals
-        "CaCO3": precipitated_init[0] ,
-        "CaSO4": precipitated_init[1] ,
-        
-        "init_SO4": init_X[2][0], 
-        "init_OH-": alpha_init[2][0],
-    }
-
+    
     # Set some information only in the highest dimension, 
     # in order to avoid techical issues later on
     if g.dim == gb.dim_max():
@@ -456,7 +471,7 @@ for g, d in gb:
        
         # Between species
         cell_equil_comp = sps.dia_matrix(
-            (np.hstack([equil_consts[0:3] for i in range(gb.num_cells())]), 0),
+            (np.hstack([init_equil_consts[0:3] for i in range(gb.num_cells())]), 0),
             shape=(
                 num_secondary_components * gb.num_cells(),
                 num_secondary_components * gb.num_cells(),
@@ -465,7 +480,7 @@ for g, d in gb:
         
         # Between aquoues and precipitating species
         cell_equil_prec = sps.dia_matrix(
-            (np.hstack([equil_consts[3:5] for i in range(gb.num_cells())]), 0),
+            (np.hstack([init_equil_consts[3:5] for i in range(gb.num_cells())]), 0),
             shape=(
                 E.shape[0] * gb.num_cells(),
                 E.shape[0] * gb.num_cells(),
@@ -474,8 +489,6 @@ for g, d in gb:
         
         
         d[pp.PARAMETERS][chemistry_kw] = {
-            "equilibrium_constants_comp": equil_consts[0:3],
-            "equilibrium_constants_prec": equil_consts[3:5],
             "cell_equilibrium_constants_comp": cell_equil_comp,
             "cell_equilibrium_constants_prec": cell_equil_prec,
             
@@ -486,7 +499,7 @@ for g, d in gb:
         }
 
         d[pp.PARAMETERS][transport_kw].update({
-            "time_step": 5e-4, 
+            "time_step": 0.3, 
             "current_time": 0,
             "final_time": 7 * pp.DAY,
             "aqueous_components": aq_components
@@ -511,7 +524,8 @@ for g, d in gb:
         pressure: init_pressure * unity,
         tot_var: init_T.copy(),
         log_var: log_conc,
-        tracer: np.zeros(unity.size),
+        tracer: unity,
+        temperature: init_temp * unity,
         
         minerals: mineral_per_cell.copy(),
         min_1: precipitated_init[0].copy() ,
@@ -524,8 +538,8 @@ for g, d in gb:
             pressure: init_pressure * unity,
             tot_var: init_T.copy(),
             log_var: log_conc.copy(),
-            tracer: np.zeros(unity.size),
-            
+            tracer: unity,
+            temperature: init_temp * unity,
             minerals: mineral_per_cell.copy(),
             min_1: precipitated_init[0].copy() ,
             min_2: precipitated_init[1].copy() ,
@@ -536,8 +550,6 @@ for g, d in gb:
 
 # end g,d-loop
 
-#pp.plot_grid(gb, "dimension", figsize=(15,12))
-
 #%% Loop over the edges:
     
 for e, d in gb.edges():
@@ -545,7 +557,9 @@ for e, d in gb.edges():
     # Initialize the primary variables and the state in the dictionary
     d[pp.PRIMARY_VARIABLES] = {mortar_pressure:    {"cells": 1},
                                mortar_transport:   {"cells": num_aq_components},
-                               mortar_tracer:      {"cells": 1}
+                               mortar_tracer:      {"cells": 1},
+                               mortar_temperature_convection : {"cells": 1},
+                               mortar_temperature_conduction : {"cells": 1}
                                 }
     pp.set_state(d)
 
@@ -565,11 +579,15 @@ for e, d in gb.edges():
         mortar_pressure: 0.0 * unity,
         mortar_transport: 0 * init_T_aq,
         mortar_tracer: 0.0 * unity,
-
+        mortar_temperature_convection: 0.0 * unity,
+        mortar_temperature_conduction: 0.0 * unity,
+        
         pp.ITERATE: {
             mortar_pressure: 0.0 * unity,
             mortar_transport: 0*init_T_aq.copy(),
-            mortar_tracer:  0.0 *unity
+            mortar_tracer:  0.0 *unity,
+            mortar_temperature_convection: 0.0 * unity,
+            mortar_temperature_conduction: 0.0 * unity
         }
     })
 
@@ -583,21 +601,65 @@ for e, d in gb.edges():
     d[pp.DISCRETIZATION_MATRICES][tracer] = {}
     
     # FLow
-    nd = interfacial_permeability * unity
-    d[pp.PARAMETERS][flow_kw] = {"darcy_flux": unity,
-                                 "normal_diffusivity":nd
-                                  }
+    d[pp.PARAMETERS][flow_kw] = {"darcy_flux": unity}
     d[pp.DISCRETIZATION_MATRICES][flow_kw] = {}
+    
+    # For temperature
+    d[pp.PARAMETERS][temperature] = {"darcy_flux": unity}
+    d[pp.DISCRETIZATION_MATRICES][temperature] = {}
 # end e,d-loop
 
-# Finally, set the normal diffusivity for the flow problem
+# Finally, set the normal diffusivities
+update_elliptic_interface(gb)
 
 #%% The data in various dimensions
 gb_2d = gb.grids_of_dimension(2)[0]
 data_2d = gb.node_props(gb_2d)
 
-# gb_1d = gb.grids_of_dimension(1)[0]
-# data_1d = gb.node_props(gb_1d)
+# Constant matrices needed for the computations
+def all_2_aquatic_mat(aq_components: np.ndarray, 
+                      num_components: int,
+                      num_aq_components: int,
+                      gb_size: int):
+    """ 
+    Create a mapping between the aqueous and fixed species
+    
+    Input: 
+        aq_componets: np.array of aqueous componets
+        num_components: int, number of components
+        num_aq : int, number of aqueous components
+        gb_size: number of cells, faces or mortar cells in the pp.GridBucket
+    """
+    
+    num_aq_components = aq_components.size
+    cols = np.ravel(
+        aq_components.reshape((-1, 1)) + (num_components * np.arange(gb_size)), order="F"
+    )
+    sz = num_aq_components * gb_size
+    rows = np.arange(sz)
+    matrix_vals = np.ones(sz)
+    
+    # Mapping from all to aquatic components. The reverse map is achieved by a transpose.
+    all_2_aquatic = pp.ad.Matrix(
+        sps.coo_matrix(
+            (matrix_vals, (rows, cols)),
+            shape=(num_aq_components * gb_size, num_components * gb_size),
+        ).tocsr()
+    )
+    
+    return all_2_aquatic
+
+def extension_mat(n,m):
+    "Extend an array of size n to size m, with m>=n"
+    assert m>=n
+    
+    k=int(m/n)
+    e=np.ones((k,1))
+    s = sps.lil_matrix((m,n)) 
+    for i in range(n):
+        s[i*k:(i+1)*k,i]=e
+    # end i-loop
+    return s.tocsr()
 
 # Fill in grid related parameters
 grid_list = [g for g,_ in gb]
@@ -610,7 +672,17 @@ data_2d[pp.PARAMETERS]["grid_params"].update({
     "trace_single": pp.ad.Trace(grid_list, nd=1),
     "trace_several": pp.ad.Trace(grid_list, nd=num_components),
     "divergence_single": pp.ad.Divergence(grid_list, dim=1),
-    "divergence_several": pp.ad.Divergence(grid_list, dim=num_aq_components)
+    "divergence_several": pp.ad.Divergence(grid_list, dim=num_aq_components),
+    
+    "all_2_aquatic": all_2_aquatic_mat(
+        aq_components, num_components, num_aq_components, gb.num_cells()
+        ),
+    "all_2_aquatic_at_interface": all_2_aquatic_mat(
+        aq_components, num_components, num_aq_components, gb.num_mortar_cells(),
+        ),
+
+    "extend_flux": extension_mat(gb.num_faces(), num_aq_components * gb.num_faces()),
+    "extend_edge_flux": extension_mat(gb.num_mortar_cells(), num_aq_components*gb.num_mortar_cells())    
     })
 
 #%% Conctruct an dof_manager, equation manager and the initial equations
@@ -621,10 +693,11 @@ equation_manager = equations.gather(gb,
                                     equation_manager=equation_manager)
 
 #%% Prepere for exporting
-#to_paraview = pp.Exporter(gb, file_name="vars_to_egc", folder_name="to_study")
+to_paraview = pp.Exporter(gb, file_name="vars", 
+                          folder_name="to_egc_final")
 time_store = np.array([1., 2., 3., 4., 5., 6., 7.]) * pp.DAY
 j=0
-fields = ["pressure",
+fields = ["pressure", "temperature",
           "Ca2+", "CO3", "SO4", "H+", 
           "HCO3", "HSO4", "OH-",
           "CaCO3", "CaSO4", 
@@ -635,7 +708,7 @@ current_time = data_2d[pp.PARAMETERS]["transport"]["current_time"]
 final_time = data_2d[pp.PARAMETERS]["transport"]["final_time"]
 
 #%% Time loop
-while current_time < 500:
+while current_time < final_time:
 
     print(f"Current time {current_time}")
 
@@ -650,18 +723,17 @@ while current_time < 500:
 
     current_time = data_2d[pp.PARAMETERS]["transport"]["current_time"]
     
-    if j < len(time_store) and np.abs(current_time - time_store[j]) < 10:
+    if j < len(time_store) and np.abs(current_time - time_store[j]) < 100:
         j+=1
+        pp.plot_grid(gb, "CaSO4", figsize=(15,12))
         #to_paraview.write_vtu(fields, time_step = current_time)
     # end if
 # end time-loop
 
-#to_paraview.write_vtu(fields, time_step = final_time)
-
 #%% Store the grid bucket
 gb_list = [gb] 
-folder_name = "to_study/" # Assume this folder exist
-gb_name = "gb_for_egc"
+folder_name = "to_egc_final/" # Assume this folder exist
+gb_name = "gb_for egc"
 
 def write_pickle(obj, path):
     """
@@ -681,32 +753,16 @@ time_steps = data_2d[pp.PARAMETERS]["previous_time_step"]["time_step"]
 
 newton_steps = np.asarray(newton_steps)
 time_steps = np.asarray(time_steps)
-time_points = np.linspace(0, 500, newton_steps.size, endpoint=True)
+time_points = np.linspace(0, final_time, newton_steps.size, endpoint=True)
 
-fig, (ax1,ax2) = plt.subplots(ncols=1, nrows=2, sharex=True, figsize=(15,12))
-ax1.plot(time_points, newton_steps, "ko-")
-ax1.tick_params(axis="y", labelsize=16,)
-ax1.set_title("Newton iterations")
+vals_to_store = np.column_stack(
+    (
+      time_points,
+      newton_steps,
+      time_steps,
+      )
+    )
 
-ax2.semilogy(time_points, time_steps, "ko-")
-ax2.tick_params(axis="y", labelsize=16)
-ax2.set_title("Time steps")
-
-ticks_val = np.array([0, 1, 2, 3, 4, 5,])*1e2 
-plt.xticks(ticks=ticks_val, 
-            labels=ticks_val , fontsize=16)
-plt.show()
-
-
-# vals_to_store = np.column_stack(
-#     (
-#       time_points,
-#       newton_steps,
-#       time_steps,
-#       )
-#     )
-
-# file_name = folder_name + "temporal_vals" 
-# np.savetxt(file_name + ".csv", vals_to_store, 
-#             delimiter=",", header="time_points, newton_steps, time_steps")
-
+file_name = folder_name + "temporal_vals" +"_non_isothermal"
+np.savetxt(file_name + ".csv", vals_to_store, 
+             delimiter=",", header="time_points, newton_steps, time_steps")

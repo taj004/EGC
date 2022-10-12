@@ -1,8 +1,6 @@
 """
 Solve a system of non-linear equations on a GB,
 using Newton's method and the AD-framework in PorePy
-
-@author: uw
 """
 
 import numpy as np
@@ -28,29 +26,44 @@ def update_darcy(gb, dof_manager):
         num_flux = num_flux.val
     # end if
     
+    # Remove fracture face contribution 
+    val = 0
+    for g,d in gb:
+        
+        ff = g.tags["fracture_faces"]
+        is_ff = np.where(ff==True)[0]
+        corr_ff = is_ff + val
+        if len(is_ff)>0:
+            num_flux[corr_ff] = 0.0
+        # end if
+        val+=g.num_faces
+    # end loop
+    
     # Get the signs
     sign_flux = np.sign(num_flux)
     
     # Finally, loop over the gb and return the signs of the darcy fluxes
     val = 0
     for g,d in gb:
+            
         inds = slice(val, val + g.num_faces) 
         x = sign_flux[inds]
         # For the solute transport we only need the signs
         d[pp.PARAMETERS]["transport"]["darcy_flux"] = x.copy()
         d[pp.PARAMETERS]["passive_tracer"]["darcy_flux"] = x.copy()
+        d[pp.PARAMETERS]["temperature"]["darcy_flux"] = x.copy()
         
         # For the flow, we need the absolute value of the signs
         d[pp.PARAMETERS]["flow"]["darcy_flux"] = np.abs(x.copy())
         
-        val += g.num_faces
+        val+=g.num_faces
     # end g,d-loop
     
     #Do the same over the interfaces 
     if gb.dim_max() > gb.dim_min():
         
         # The flux
-        edge_flux = data[pp.PARAMETERS]["previous_newton_iteration"]["AD_lam_flux"]
+        edge_flux = data[pp.PARAMETERS]["previous_newton_iteration"]["AD_edge_flux"]
         num_edge_flux = edge_flux.evaluate(dof_manager)
         if hasattr(num_edge_flux, "val"):
             num_edge_flux = num_edge_flux.val
@@ -65,6 +78,8 @@ def update_darcy(gb, dof_manager):
             d[pp.PARAMETERS]["transport"]["darcy_flux"] = x.copy()
             d[pp.PARAMETERS]["flow"]["darcy_flux"] = x.copy()
             d[pp.PARAMETERS]["passive_tracer"]["darcy_flux"] = x.copy()
+            d[pp.PARAMETERS]["temperature"]["darcy_flux"] = x.copy()
+
             val += nc
         # end e,d-loop
 
@@ -88,7 +103,7 @@ def clip_variable(x, dof_manager, target_name, min_val, max_val):
 
 def backtrack(equation, dof_manager, 
               grad_f, p_k, x_k, f_0, 
-              maxiter=5, min_tol=1e-3):
+              maxiter=7, min_tol=1e-3):
     """
     Compute a stp size, using Armijo interpolation backtracing
     """
@@ -139,9 +154,9 @@ def backtrack(equation, dof_manager,
             vec = np.array([ phi_new - f_k - dot*alpha,
                              phi_old - f_k - dot*alpha_prev ] )
             
-            numerator = alpha - alpha_prev 
+            denominator = alpha - alpha_prev 
         
-            a,b = (1/ numerator) * np.matmul(mat, vec)
+            a,b = (1/ denominator) * np.matmul(mat, vec)
             
             if np.abs(a)>1e8 or np.abs(b)>1e8:
                 flag=1
@@ -156,8 +171,6 @@ def backtrack(equation, dof_manager,
        # end if-else    
        
         # Check if the new step size is to big
-        # From a safty point of view, this helps if alpha_temp is inf.
-        # Is it ok to use if alpha_temp is nan?
         alpha_temp = min(alpha_temp,u)
     
         # Update the values, while ensuring that step size is not too small
@@ -254,6 +267,9 @@ def newton_gb(gb: pp.GridBucket,
         # Update the grid parameters
         update_param.update(gb)
         
+        # Update equilbrium constants
+        update_param.equil_constants(gb)
+        
         # --------------------- # 
         
         # Increase number of steps
@@ -271,8 +287,10 @@ def newton_gb(gb: pp.GridBucket,
         norm_now = np.linalg.norm(resid)
         err_dist = np.linalg.norm(dx, np.inf) 
         # Stop if converged. 
-        if norm_now < 1e-7 * norm_orig or norm_now < 1e-6 or \
-            err_dist < 1e-8 * np.linalg.norm(x_new, np.inf):
+        if (
+                norm_now < 1e-7 * norm_orig or norm_now < 1e-6 or 
+                err_dist < 1e-9 * np.linalg.norm(x_new, np.inf)
+                ):
             print("Solution reached")
             conv = True
         # end if
