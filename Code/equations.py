@@ -403,14 +403,14 @@ def gather(gb,
         # onto the interfaces
         high_to_low = ( 
             up_weight_primary * 
-            mortar_projection.primary_to_mortar_int * 
+            mortar_projection.primary_to_mortar_avg * 
             trace.trace * 
             rho_ad_main
             ) 
         
         low_to_high = (
             up_weight_secondary * 
-            mortar_projection.secondary_to_mortar_int *
+            mortar_projection.secondary_to_mortar_avg *
             rho_ad_main
             )
         
