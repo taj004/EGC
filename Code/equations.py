@@ -4,9 +4,9 @@ import porepy as pp
 import scipy.sparse as sps
 
 def repeat(v, reps, dof_manager, abs_val=False):
-    """
-    Repeat a vector v, reps times
+    """Repeat a vector v, reps times
     Main target is the flux vectors, in the transport processes  
+    
     """
     # Currently only for ad_arrays
     if isinstance(v, np.ndarray):
@@ -63,8 +63,8 @@ def remove_frac_face_flux(full_flux, gb, dof_manager):
     return pp.ad.Array(num_flux)
 
 def rho(p, temp):
-    """
-    Constitutive law between density and pressure 
+    """Constitutive law between density and pressure 
+    
     """
     # reference density 
     rho_f = 1000
@@ -78,15 +78,15 @@ def rho(p, temp):
     temp_ref = 573.15 # [K]
     
     density = rho_f * (
-            1+ c * (p - p_ref) - beta*(temp-temp_ref)
+            1 + c*(p-p_ref) - beta*(temp-temp_ref)
             )
 
     return density
 
 
 def to_vec(gb, param_kw, param, size_type="cells", to_ad=False):
-    """
-    Make a vector of a parameter param, from a param_kw
+    """Make a vector of a parameter param, from a param_kw
+    
     """
     
     if size_type=="cells":
@@ -127,9 +127,9 @@ def to_vec(gb, param_kw, param, size_type="cells", to_ad=False):
 
 
 def extension_mat(n,m):
-    """
-    Construct a mxn matrix S such that S*v=v_hat
-    where v is a vextor of shape n and v_hat is a mx1 extention of v
+    """Construct a mxn matrix S such that S*v=v_hat
+    where v is a vector of shape n and v_hat is a mx1 extention of v
+    
     """
     if n>m:
         raise ValueError("n must be greater than m")
@@ -143,6 +143,7 @@ def extension_mat(n,m):
 
 def split_bc(bc,dof_manager,keyword="flow"):
     """Split boundary condition into Dirichlet and Neumann"""
+    
     # Grid information
     gb = dof_manager.gb
     g = gb.grids_of_dimension(gb.dim_max())[0]
@@ -174,14 +175,15 @@ def gather(gb,
     """
     Collect and discretize equations on a GB 
     
-    Parameters
+    Parameters:
     ----------
-    gb : grid bucket
-    dof_manager : dof_manager for ...
-    equation_manager: an equation manager that keeps the 
+    gb: A PorePy grid bucket
+    dof_manager: A PorePy degree of freedom (dof) manger  
+    equation_manager: A PorePy equation manager that keeps the 
                       information about the equations
-    iterate : bool, whether the equations are updated in the Newton iterations (True),
-                    or formed at the start of a time step (False).  
+    iterate: bool, whether the equations are updated in the Newton iterations (True),
+                   or formed at the start of a time step (False).  
+                    
     """    
     
     # Keywords:
@@ -204,7 +206,8 @@ def gather(gb,
     mortar_temperature_convection = "mortar_temperature_convection"
     mortar_temperature_conduction = "mortar_temperature_conduction"
     
-    # Loop over the gb
+    # Loop over the gb to get some information
+    # (more appropriate approaches exist)
     for g,d in gb:
         
         # Get data that are necessary for later use
@@ -215,9 +218,6 @@ def gather(gb,
             data_prev_newton = d[pp.PARAMETERS]["previous_newton_iteration"]      
             data_grid = d[pp.PARAMETERS]["grid_params"]
             
-            # The number of components         
-            #num_aq_components = d[pp.PARAMETERS][transport_kw]["num_components"]
-            #num_components = d[pp.PARAMETERS][mass_kw]["num_components"]
         # end_if
     # end g,d-loop
 
@@ -249,7 +249,6 @@ def gather(gb,
     temp = equation_manager.merge_variables(
         [(g, temperature) for g in grid_list]
         )
- 
     
       # The fluxes over the interfaces
     if len(edge_list) > 0:
@@ -305,14 +304,8 @@ def gather(gb,
     equilibrium_eq.set_name("equilibrium")
     
     #%% The flow equation 
-   
-    # Compute the second order tensor
-    # for g,d in gb:
-    #     K = d[pp.PARAMETERS][flow_kw]["permeability"] # The permeability
-    #     d[pp.PARAMETERS][flow_kw].update({"second_order_tensor": pp.SecondOrderTensor(K)})
-    # # end g,d-loop
-    
-      # The divergence
+       
+   # The divergence
     div = data_grid["divergence_single"]
     
     # A projection between subdomains and mortar grids
@@ -762,8 +755,8 @@ def gather(gb,
     # 4) boundary condition for outlet.
     
     # The upwind discretization matrices are calculated so that 
-    # they are essentially 1 at the flux indices, but not scaled by the flux at all,
-    # so this is not completely in accordance with the description of the paper.
+    # they are 1 at the flux subdomain indices, and not scaled by the flux at all.
+    # So it is not in accordance with the description of the paper.
     # If you want to file a complaint about this, contact Eirik Keilegavlen.
     
     # The fluxes computed above, in the flow part as
