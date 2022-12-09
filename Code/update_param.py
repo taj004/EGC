@@ -276,7 +276,7 @@ def update_elliptic_interface(gb):
         
         # Conduction
         fluid_condution = data_l[pp.PARAMETERS]["temperature"]["fluid_conduction"]
-        q = 2 * fluid_condution / (mg.secondary_to_mortar_avg() * aperture) 
+        q = 2 * fluid_condution * Vj / (mg.secondary_to_mortar_avg() * aperture) 
         d[pp.PARAMETERS]["temperature"].update({"normal_diffusivity": q})
     # end e,d-loop
 
