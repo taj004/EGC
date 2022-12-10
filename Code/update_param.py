@@ -9,8 +9,8 @@ import scipy.sparse as sps
 from equations import rho
 
 def equil_constants(gb, temp=None):
-    """
-    Calculate the equilibirum constants for a given temperature
+    """Calculate the equilibirum constants for a given temperature
+    
     """
     
     R = 8.314 # Gas constant
@@ -71,10 +71,10 @@ def equil_constants(gb, temp=None):
             ref_eq = d[pp.PARAMETERS]["reference"]["equil_consts"] 
             ref_eq = np.tile(ref_eq, g.num_cells)
            
-            # Calulate the equilibrium constants
+            # Calulate the equilibrium constants using a linearized van't Hoff equation
             taylor_app = ( 
                 1 + cell_wise_c * dt / ref_temp**2
-               # + cell_wise_c * (cell_wise_c-2*ref_temp) * np.power(dt, 2) / ref_temp**4 
+         
                 )
             cell_equil_consts = ref_eq * taylor_app #* np.exp(cell_wise_c * temp_factor)
             
@@ -121,8 +121,8 @@ def equil_constants(gb, temp=None):
     # end if
 
 def matrix_perm(phi, ref_phi, ref_perm):
-    """
-    The matrix permeability
+    """The matrix permeability
+    
     """
     factor1 = np.power((1-ref_phi), 2) / np.power((1-phi), 2)
     factor2 = np.power(phi/ref_phi, 3)
@@ -130,15 +130,15 @@ def matrix_perm(phi, ref_phi, ref_perm):
     return K
 
 def fracture_perm(aperture):
-    """
-    Cubic law for the fracture permeability
+    """Cubic law for the fracture permeability
+    
     """
     K = np.power(aperture, 2) / 12 
     return K 
 
 def update_perm(gb):
-    """
-    Update the permeability in the matrix and fracture
+    """Update the permeability in the matrix and fracture
+    
     """
     
     for g,d in gb:     
@@ -175,13 +175,10 @@ def update_perm(gb):
     # end g,d-loop    
     
 def update_mass_weight(gb):
-    """
-    Update the mass weights in the transport equations:
+    """Update the porosity-dependent parts in the transport equations:
     For the soltue transport this is the porosity, while for the 
-    temeprature equation, it is the heat capacity
-        
-    The porosity is updated as "porosity = 1 - sum_m x_m",
-    where x_m is the mth volume mineral fraction 
+    temeprature equation, it is the heat capacity and conductivity
+
     
     """
     for g,d in gb:
@@ -249,9 +246,9 @@ def update_mass_weight(gb):
         
     
 def update_elliptic_interface(gb):
-    """
-    Update the elliptic interfaces, following
+    """Update the elliptic interfaces, following
     https://github.com/IvarStefansson/A-fully-coupled-numerical-model-of-thermo-hydro-mechanical-processes-and-fracture-contact-mechanics-
+    
     """
 
     for e,d in gb.edges():
@@ -286,8 +283,8 @@ def specific_vol(gb,g):
 
     
 def update_intersection(gb):
-    """
-    aperture and specific volume at intersection points (i.e. 0-d)
+    """aperture and specific volume at intersection points (i.e. 0-d)
+    
     """
     for g,d in gb:
         
@@ -349,7 +346,8 @@ def update_intersection(gb):
 
 def update_aperture(gb):
     """
-    Update the aperture in the fracture (1-D). The 0-D case is handled by update_speific_volumes 
+    Update the aperture in the fracture (1-D). The 0-D case is handled by update_speific_volume
+    s 
     """
     for g,d in gb:
         
@@ -401,8 +399,8 @@ def update_aperture(gb):
     # end g,d-loop
     
 def update(gb):
-    """
-    Update the aperture, mass weight and permeability
+    """Update the aperture, mass weight and permeability
+    
     """
     update_aperture(gb)
     
@@ -423,8 +421,8 @@ def update(gb):
     return gb
    
 def update_concentrations(gb, dof_manager, to_iterate=False):
-    """
-    Update concenctations
+    """Update concenctations
+    
     """
     dof_ind = np.cumsum(np.hstack((0, dof_manager.full_dof)))
     x = dof_manager.assemble_variable(from_iterate=True)

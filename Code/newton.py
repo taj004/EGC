@@ -11,8 +11,8 @@ import equations
 import update_param
 
 def update_darcy(gb, dof_manager):
-    """
-    Update the darcy flux in the parameter dictionaries 
+    """Update the darcy flux in the parameter dictionaries 
+    
     """
     
     # Get the Ad-fluxes

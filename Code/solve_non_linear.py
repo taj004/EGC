@@ -9,9 +9,10 @@ from newton import newton_gb
 from update_param import update_concentrations
     
 def solve(gb, dof_manager, equation_manager):
+    """Solve the non-linear equations, and possibly adjust the time step
+    
     """
-    Solve the non-linear equations, and possibly adjust the time step
-    """
+    
     conv, newton_iter, flag = newton_gb(gb, 
                                  equation_manager, 
                                  dof_manager, 

@@ -25,6 +25,7 @@ def create_mesh(mesh_args):
         mesh_args: dict parameters for discretization
     Return:
         gb: a grid bucket
+        
     """
     pts = np.array([[0.6, 0.2], # End pts 
                     [0.2, 0.8], # Statring pts
@@ -49,9 +50,6 @@ def create_mesh(mesh_args):
     return gb
     
 # %% Initialize variables related to the chemistry and the domain
-
-# Start with the chemical variables
-# like equilibrium constants, stoichiometric coeffients, number of species(aqueous, fixed) etc
 
 # Equilibrium constants. Take exponential, as they are given on log-scale
 # Moreover, we consider the reciprocal of the equilibrium constants,
@@ -105,6 +103,7 @@ mesh_args = {"mesh_size_frac" : dx,
              "mesh_size_min"  : dz}
 gb = create_mesh(mesh_args)
 
+#%%
 domain = {"xmin": 0, "xmax": gb.bounding_box()[1][0],
           "ymin": 0, "ymax": gb.bounding_box()[1][1]}
 
@@ -288,7 +287,7 @@ for g, d in gb:
         labels_for_flow = neu_faces.copy()
         labels_for_flow[outflow] = "dir"
         labels_for_flow[inflow] = "dir"
-        #-3.5e-5 * g.face_areas[bound_faces[inflow]]#
+
         # Set the BC values for flow
         bc_values_for_flow = np.zeros(g.num_faces)
         bc_values_for_flow[bound_faces[inflow]] = 7 * init_pressure

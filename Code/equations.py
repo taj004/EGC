@@ -3,65 +3,6 @@ import numpy as np
 import porepy as pp
 import scipy.sparse as sps
 
-def repeat(v, reps, dof_manager, abs_val=False):
-    """Repeat a vector v, reps times
-    Main target is the flux vectors, in the transport processes  
-    
-    """
-    # Currently only for ad_arrays
-    if isinstance(v, np.ndarray):
-        raise ValueError("Can only repeat Ad-arrays")
-    # end if    
-    
-    # Get expression for evaluation and check attributes 
-    expression_v = v.evaluate(dof_manager)
-    if isinstance(expression_v, np.ndarray):
-        num_v = expression_v
-    elif hasattr(expression_v, "val"):
-        num_v = expression_v.val
-    else :
-        raise ValueError("Cannot repeat this vector")
-    # end if-else
-    
-    num_v_reps = np.repeat(num_v, reps)
-    
-    # Wrap the array in Ad.
-    if abs_val is True:
-        ad_reps = pp.ad.Array(np.abs(num_v_reps))
-    else:
-        ad_reps = pp.ad.Array(num_v_reps)
-        
-    return  ad_reps
-
-def remove_frac_face_flux(full_flux, gb, dof_manager):
-    """Put the fluxes at the fracture faces to zero"""
-    
-    num_flux = full_flux.evaluate( dof_manager)
-    if hasattr(num_flux, "val"):
-        num_flux = num_flux.val
-    # end if
-    val = 0
-    for g, d in gb:
-        
-        # Get the fracture faces 
-        fracture_faces = g.tags["fracture_faces"]
-        
-        # Remove the contribution on the faces directly
-        is_fracture_faces = np.where(fracture_faces==True)[0]
-        
-        # To remove the flux at fracture fraces in the lower dimensions,
-        # we need to correct the fracture face indexing
-        correct_fracture_faces = is_fracture_faces + val
-       
-        if len(is_fracture_faces) > 0:    
-            num_flux[correct_fracture_faces] = 0
-        # end if
-        
-        val += g.num_faces
-    # end g,d-loop
-    
-    return pp.ad.Array(num_flux)
-
 def rho(p, temp):
     """Constitutive law between density and pressure 
     
@@ -124,45 +65,6 @@ def to_vec(gb, param_kw, param, size_type="cells", to_ad=False):
         return pp.ad.Array(vec)
     else:
         return vec
-
-
-def extension_mat(n,m):
-    """Construct a mxn matrix S such that S*v=v_hat
-    where v is a vector of shape n and v_hat is a mx1 extention of v
-    
-    """
-    if n>m:
-        raise ValueError("n must be greater than m")
-    # end if
-    
-    S = sps.bmat([
-        [sps.eye(n,n)],
-        [sps.eye(m-n,n)]
-        ])
-    return S
-
-def split_bc(bc,dof_manager,keyword="flow"):
-    """Split boundary condition into Dirichlet and Neumann"""
-    
-    # Grid information
-    gb = dof_manager.gb
-    g = gb.grids_of_dimension(gb.dim_max())[0]
-    d = gb.node_props(g)[pp.PARAMETERS][keyword]["bc"]
-    
-    # Boundary values
-    bc_val = bc.evaluate(dof_manager)
-    
-    # The Neumann and Dirichlet indices
-    neu_ind = np.where(d.is_neu)
-    dir_ind = np.where(d.is_dir)
-    
-    neu_bc = np.zeros(dof_manager.gb.num_faces())
-    dir_bc  = neu_bc.copy()
-    
-    neu_bc[neu_ind] = bc_val[neu_ind]
-    dir_bc[dir_ind] = bc_val[dir_ind]
-    
-    return pp.ad.Array(dir_bc), pp.ad.Array(neu_bc)
     
 #%% Assemble the non-linear equations
     
@@ -802,7 +704,6 @@ def gather(gb,
         upwind_coupling_primary = upwind_coupling.upwind_primary
         upwind_coupling_secondary = upwind_coupling.upwind_secondary
         
-        #expanded_lam = repeat(v, num_aq_components, dof_manager, abs_val=True )
         expanded_v = pp.ad.Matrix(data_grid["extend_edge_flux"]) * v
         # First project the concentration from high to low
         # At the higher-dimensions, we have both fixed 
