@@ -69,21 +69,19 @@ def to_vec(gb, param_kw, param, size_type="cells", to_ad=False):
 #%% Assemble the non-linear equations
     
 def gather(gb, 
-           dof_manager,
            equation_manager,
            iterate = False
            ):
     
     """
-    Collect and discretize equations on a GB 
+    Collect and discretize equations on a PorePy grid bucket
     
     Parameters:
     ----------
-    gb: A PorePy grid bucket
-    dof_manager: A PorePy degree of freedom (dof) manger  
-    equation_manager: A PorePy equation manager that keeps the 
+        gb: A PorePy grid bucket
+        equation_manager: A PorePy equation manager that keeps the 
                       information about the equations
-    iterate: bool, whether the equations are updated in the Newton iterations (True),
+        iterate: bool, whether the equations are updated in the Newton iterations (True),
                    or formed at the start of a time step (False).  
                     
     """    

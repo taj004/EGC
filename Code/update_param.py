@@ -111,13 +111,12 @@ def equil_constants(gb, temp=None):
     
     else: # This part is ment to calculate the exponential part 
           # at a given (scalar) temperature  
-          
-          dt = np.clip(temp-ref_temp, a_min=-ref_temp/6, a_max=ref_temp/6) 
+        dt = np.clip(temp-ref_temp, a_min=-ref_temp/6, a_max=ref_temp/6) 
    
-          exponential_part = ( 
-              1 + c * dt / ref_temp**2
-              )
-          return exponential_part
+        exponential_part = ( 
+          1 + c * dt / ref_temp**2
+          )
+        return exponential_part
     # end if
 
 def matrix_perm(phi, ref_phi, ref_perm):

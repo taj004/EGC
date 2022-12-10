@@ -14,11 +14,11 @@ def solve(gb, dof_manager, equation_manager):
     """
     
     conv, newton_iter, flag = newton_gb(gb, 
-                                 equation_manager, 
-                                 dof_manager, 
-                                 "log_X", 
-                                 np.array([-30, 25]) 
-                                 )
+                                        equation_manager, 
+                                        dof_manager, 
+                                        "log_X", 
+                                        np.array([-30, 25]) 
+                                        )
     
     # See if we have converged. If not need to repeat the current time  
     # with a smaller time step
@@ -70,7 +70,7 @@ def solve(gb, dof_manager, equation_manager):
     
     data_transport["current_time"] = current_time
     
-    return 
+    return None
     
 def solve_eqs(gb, dof_manager, equation_manager):
     """

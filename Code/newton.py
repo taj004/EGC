@@ -71,7 +71,7 @@ def update_darcy(gb, dof_manager):
         sign_edge_flux = np.sign(num_edge_flux)
         
         val = 0
-        for e,d in gb.edges():
+        for _,d in gb.edges():
             nc = d["mortar_grid"].num_cells
             inds = slice(val, val+nc)
             x = sign_edge_flux[inds]
@@ -277,7 +277,6 @@ def newton_gb(gb: pp.GridBucket,
         
         # Update equations
         equation = equations.gather(gb, 
-                                    dof_manager=dof_manager,
                                     equation_manager=equation,
                                     iterate=True
                                     ) 

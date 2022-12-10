@@ -687,12 +687,11 @@ data_2d[pp.PARAMETERS]["grid_params"].update({
 #%% Conctruct an dof_manager, equation manager and the initial equations
 dof_manager = pp.DofManager(gb)
 equation_manager = pp.ad.EquationManager(gb, dof_manager)
-equation_manager = equations.gather(gb,
-                                    dof_manager=dof_manager,
-                                    equation_manager=equation_manager)
+equation_manager = equations.gather(gb, equation_manager=equation_manager)
 
 #%% Prepere for exporting
-to_paraview = pp.Exporter(gb, file_name="vars", 
+to_paraview = pp.Exporter(gb, 
+                          file_name="vars", 
                           folder_name="to_egc_final")
 time_store = np.array([1., 2., 3., 4., 5., 6., 7.]) * pp.DAY
 j=0
@@ -715,8 +714,7 @@ while current_time < final_time:
     solve_eqs(gb, dof_manager, equation_manager)
     
     # Connect and collect the equations
-    equation_manager = equations.gather(gb,
-                                        dof_manager=dof_manager,
+    equation_manager = equations.gather(gb, 
                                         equation_manager=equation_manager,
                                         iterate=False)
 
@@ -724,8 +722,7 @@ while current_time < final_time:
     
     if j < len(time_store) and np.abs(current_time - time_store[j]) < 100:
         j+=1
-        pp.plot_grid(gb, "CaSO4", figsize=(15,12))
-        #to_paraview.write_vtu(fields, time_step = current_time)
+        to_paraview.write_vtu(fields, time_step = current_time)
     # end if
 # end time-loop
 
