@@ -64,7 +64,6 @@ def create_mesh(mesh_args):
 equil_consts_plummer = 1 / np.exp(np.array([10.339, 1.979, -13.997, -8.406, -4.362])) 
 equil_consts_plummer[3:5] = 1 / equil_consts_plummer[3:5]
 
-
 # Stochiometric matrix for the reactions between primary and secondary species.
 # Between aqueous species
 S = sps.csr_matrix(
@@ -103,11 +102,10 @@ mesh_args = {"mesh_size_frac" : dx,
              "mesh_size_min"  : dz}
 gb = create_mesh(mesh_args)
 
-#%%
 domain = {"xmin": 0, "xmax": gb.bounding_box()[1][0],
           "ymin": 0, "ymax": gb.bounding_box()[1][1]}
 
-# Keywords
+#%% Keywords
 mass_kw = "mass"
 chemistry_kw = "chemistry"
 transport_kw = "transport"
@@ -156,11 +154,11 @@ for g, d in gb:
     d["is_tangential"] = True
 
     # Initialize the primary variable dictionaries
-    d[pp.PRIMARY_VARIABLES] = {pressure: {"cells": 1},
-                               tot_var:  {"cells": num_components},
-                               log_var:  {"cells": num_components},
-                               minerals: {"cells": 2},
-                               tracer:   {"cells": 1},
+    d[pp.PRIMARY_VARIABLES] = {pressure:    {"cells": 1},
+                               tot_var:     {"cells": num_components},
+                               log_var:     {"cells": num_components},
+                               minerals:    {"cells": 2},
+                               tracer:      {"cells": 1},
                                temperature: {"cells": 1}
                                }
 
@@ -366,7 +364,6 @@ for g, d in gb:
 
     # Initial guess for Darcy flux
     init_darcy_flux = np.ones(g.num_faces)
-   # init_darcy_flux[g.get_internal_faces()] = 1.0
     
     # Calulate the heat capacity
     fluid_density = equations.rho(init_pressure, init_temp)
@@ -397,7 +394,9 @@ for g, d in gb:
         "bc_values": bc_values_for_flow,
         "bc": bound_for_flow,
         "permeability": K * specific_volume.copy() / dynamic_viscosity,
-        "second_order_tensor": pp.SecondOrderTensor(K * specific_volume.copy() / dynamic_viscosity),
+        "second_order_tensor": pp.SecondOrderTensor(
+            K * specific_volume.copy() / dynamic_viscosity
+            ),
         "darcy_flux": init_darcy_flux,
         "dynamic_viscosity": dynamic_viscosity
     }
@@ -620,14 +619,14 @@ def all_2_aquatic_mat(aq_components: np.ndarray,
                       num_components: int,
                       num_aq_components: int,
                       gb_size: int):
-    """ 
-    Create a mapping between the aqueous and fixed species
+    """ Create a mapping between the aqueous and fixed species
     
     Input: 
         aq_componets: np.array of aqueous componets
         num_components: int, number of components
         num_aq : int, number of aqueous components
         gb_size: number of cells, faces or mortar cells in the pp.GridBucket
+    
     """
     
     num_aq_components = aq_components.size
@@ -725,6 +724,8 @@ while current_time < final_time:
         to_paraview.write_vtu(fields, time_step = current_time)
     # end if
 # end time-loop
+
+to_paraview.write_vtu(fields, time_step = current_time)
 
 #%% Store the grid bucket
 gb_list = [gb] 
