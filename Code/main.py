@@ -49,7 +49,7 @@ def create_mesh(mesh_args):
     
     return gb
     
-# %% Initialize variables related to the chemistry and the domain
+# %% Initialise variables related to the chemistry and the domain
 
 # Equilibrium constants. Take exponential, as they are given on log-scale
 # Moreover, we consider the reciprocal of the equilibrium constants,

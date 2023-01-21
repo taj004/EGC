@@ -104,8 +104,8 @@ def clip_variable(x, dof_manager, target_name, min_val, max_val):
 def backtrack(equation, dof_manager, 
               grad_f, p_k, x_k, f_0, 
               maxiter=7, min_tol=1e-3):
-    """
-    Compute a stp size, using Armijo interpolation backtracing
+    """ Compute a stp size, using Armijo interpolation backtracing
+    
     """
     # Initialize variables
     c_1 = 1e-4
@@ -194,23 +194,28 @@ def newton_gb(gb: pp.GridBucket,
               dof_manager: pp.DofManager, 
               target_name: str = "",
               clip_low_and_up: np.array = np.array([1e-100, 1e100])):
-    """
-    Newton's method applied to an equation, pulling values and state from gb.
+    """ Newton's method applied to an equation, pulling values and state from gb.
     
-    Parameters
-    ----------
-    equation, The equation we want to solve
-    dof_manager, the associated dof_manager
-    target_name, string. Value used to target a keyword and clip the associated numerical values 
-    clip_low_and_up, numpy array. the upper and lower bound for clipping. 
-          The form is np.array([low, up]). The values are interpreted as log values, 
-          e.g. for np.array([-30,25]), -30 and 25 are interpreted as
-              -30=log(x1), 25=log(x2)     
+    Parameters:
+        gb: A PorePy grid bucket
+        equation: The equation we want to solve
+        dof_manager: A degree of freedom manager 
+                    assosiated with the equation manager
+        target_name: String. Name of variable to be cliped. 
+        Default is empty name
+        clip_low_and_up: An array (shape=(2, )), representing 
+        the upper and lower bound for clipping. 
+        The form is np.array([low, up]). The values are 
+        interpreted as log values, 
+        e.g. for np.array([-30,25]), 
+        -30 and 25 are interpreted as -30=log(x1), 25=log(x2)     .
+        Defalt is np.array([1e-100, 1e100]) 
     
-    Returns
-    ----------
-    conv, bool, whether Newton converged within a tolerance and maximum number of iterations
-    i, int, the number of iterations used
+    Returns:
+        conv (boolean): whether Newton converged  
+        i (int): the number of iterations used
+        flag (int): Check if something went wrong in the Newton solver,
+        for instance a solution became Nan
     """
   
     J, resid = equation.assemble()
@@ -256,7 +261,6 @@ def newton_gb(gb: pp.GridBucket,
         dof_manager.distribute_variable(x_new.copy(), to_iterate=True)
         
         # --------------------- #
-        
         
         # Update the Darcy flux in the parameter dictionries
         update_darcy(gb, dof_manager)   

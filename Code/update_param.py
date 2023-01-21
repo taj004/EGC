@@ -50,7 +50,7 @@ def equil_constants(gb, temp=None):
         val = 0
         for g,d in gb:
              
-            if g.dim == 2:
+            if g.dim == gb.dim_max():
                 data = d
             # end if
             
@@ -71,7 +71,7 @@ def equil_constants(gb, temp=None):
             ref_eq = d[pp.PARAMETERS]["reference"]["equil_consts"] 
             ref_eq = np.tile(ref_eq, g.num_cells)
            
-            # Calulate the equilibrium constants using a linearized van't Hoff equation
+            # Calulate the equilibrium constants using a linearised van't Hoff equation
             taylor_app = ( 
                 1 + cell_wise_c * dt / ref_temp**2
          
@@ -154,7 +154,7 @@ def update_perm(gb):
             ref_perm = d_ref["permeability"]
             aperture = d[pp.PARAMETERS]["mass"]["aperture"]
             # Fracture permeability 
-            K= fracture_perm(aperture) 
+            K = fracture_perm(aperture) 
         # end if-else
         
         specific_volume = specific_vol(gb, g)
@@ -170,14 +170,12 @@ def update_perm(gb):
         # We are also interested in the current permeability,
         # compared to the initial one
         d[pp.STATE].update({"ratio_perm": K/ref_perm}) 
-        
     # end g,d-loop    
     
 def update_mass_weight(gb):
-    """Update the porosity-dependent parts in the transport equations:
+    """ Update the porosity-dependent parts in the transport equations:
     For the soltue transport this is the porosity, while for the 
     temeprature equation, it is the heat capacity and conductivity
-
     
     """
     for g,d in gb:
@@ -292,7 +290,6 @@ def update_intersection(gb):
         # end if
         #init_volume = d[pp.PARAMETERS]["reference"]["specific_volume"]
         
-        
         parent_aperture = []
         num_parent = []
         
@@ -329,13 +326,10 @@ def update_intersection(gb):
                 
             aperture = np.sum(parent_aperture, axis=0) / num_parent 
             
-            if pp.PARAMETERS not in d.keys():
-                #breakpoint()
+            if pp.PARAMETERS not in d.keys(): # When data is initialised
                 return aperture
-            else:
-                #breakpoint()
+            else: # During the simulations
                 volume = np.power(aperture, gb.dim_max() - g.dim)
-                #volume=np.clip(volume, a_min=1e-5, a_max=1)
                 d[pp.PARAMETERS]["mass"].update({"aperture": aperture, 
                                                  "specific_volume": volume})   
                 
@@ -393,7 +387,6 @@ def update_aperture(gb):
                                              "specific_volume": aperture.copy()})
             
             d[pp.STATE]["aperture_difference"] = open_aperture - aperture.copy()
-                        
         # end if
     # end g,d-loop
     
@@ -464,7 +457,7 @@ def update_concentrations(gb, dof_manager, to_iterate=False):
        
             eq_inds=slice(cell_val, cell_val+ S.shape[0]*g.num_cells)            
             eq_const_on_grid = sps.diags(eq[eq_inds])
-            # breakpoint()
+            
             cell_val += g.num_cells * S.shape[0]
             S_on_grid = sps.block_diag([S for i in range(g.num_cells)]).tocsr()
             secondary_species = eq_const_on_grid * np.exp(S_on_grid * primary) 
@@ -494,7 +487,6 @@ def update_concentrations(gb, dof_manager, to_iterate=False):
             "HSO4": secondary_species[1::3],
             "OH-" : secondary_species[2::3],   
             })
-         
         # end if
           
     # end g,d-loop
