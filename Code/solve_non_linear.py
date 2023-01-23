@@ -69,9 +69,7 @@ def solve(gb, dof_manager, equation_manager):
     # end if
     
     data_transport["current_time"] = current_time
-    
-    return None
-    
+        
 def solve_eqs(gb, dof_manager, equation_manager):
     """
     Solve the non-linear equations
@@ -88,4 +86,3 @@ def solve_eqs(gb, dof_manager, equation_manager):
     """
     solve(gb, dof_manager, equation_manager)
     update_concentrations(gb, dof_manager)
-    return  None 

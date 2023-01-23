@@ -68,6 +68,7 @@ def update_darcy(gb, dof_manager):
         if hasattr(num_edge_flux, "val"):
             num_edge_flux = num_edge_flux.val
         # end if
+        
         sign_edge_flux = np.sign(num_edge_flux)
         
         val = 0
@@ -82,8 +83,7 @@ def update_darcy(gb, dof_manager):
 
             val += nc
         # end e,d-loop
-
-    return
+    # end if
 
 def clip_variable(x, dof_manager, target_name, min_val, max_val):
     """

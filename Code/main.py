@@ -149,7 +149,7 @@ init_equil_consts = equil_constants(gb, temp=init_temp) * equil_consts_plummer
 bc_equil_consts = equil_constants(gb, temp=bc_temp) * equil_consts_plummer
 
 for g, d in gb:
-    #print(g.cell_volumes)
+
     gb.add_node_props(["is_tangential"])
     d["is_tangential"] = True
 
@@ -665,8 +665,13 @@ edge_list = [e for e,_ in gb.edges()]
 data_2d[pp.PARAMETERS]["grid_params"].update({
     "grid_list": grid_list,
     "edge_list": edge_list,
-    "mortar_projection_single": pp.ad.MortarProjections(gb, edges=edge_list, grids=grid_list, nd=1),
-    "mortar_projection_several": pp.ad.MortarProjections(gb, edges=edge_list, grids=grid_list, nd=num_components),
+    "mortar_projection_single": pp.ad.MortarProjections(gb, 
+                                                        edges=edge_list, 
+                                                        grids=grid_list, nd=1),
+    "mortar_projection_several": pp.ad.MortarProjections(gb, 
+                                                         edges=edge_list, 
+                                                         grids=grid_list, 
+                                                         nd=num_components),
     "trace_single": pp.ad.Trace(grid_list, nd=1),
     "trace_several": pp.ad.Trace(grid_list, nd=num_components),
     "divergence_single": pp.ad.Divergence(grid_list, dim=1),
@@ -680,7 +685,9 @@ data_2d[pp.PARAMETERS]["grid_params"].update({
         ),
 
     "extend_flux": extension_mat(gb.num_faces(), num_aq_components * gb.num_faces()),
-    "extend_edge_flux": extension_mat(gb.num_mortar_cells(), num_aq_components*gb.num_mortar_cells())    
+    "extend_edge_flux": extension_mat(gb.num_mortar_cells(), 
+                                      num_aq_components*gb.num_mortar_cells()
+                                      )    
     })
 
 #%% Conctruct an dof_manager, equation manager and the initial equations
